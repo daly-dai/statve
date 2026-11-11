@@ -179,7 +179,7 @@
 | C2 | 沙箱容器（**2026-09-14 扩范围：加"网络维度"**——原设计只有文件/进程，网络是空白） | **codex `network-proxy` + Windows MXC**（最新侦察）/ OpenHands / DSH sandbox | — | — | 未开始 |
 | C3 | 子智能体 / handoffs | DSH subagent（8 种实现）；⚠️ **动红线文件** `lib/agent/index.ts`（改动前须精读 pi → 对比 → 展示 → 用户拍板） | — | — | 未开始 |
 | B6 | **记忆分层**：会话 + 摘要已有，补"主动回忆/新鲜度" | Reasonix memory | — | — | 未开始 |
-| C6 | **新增工作空间**：应用内目录浏览器（列一层目录 / 新建文件夹 / 面包屑 / 可手输路径）选一个文件夹，它成为一条**工作空间记录**；**每个会话都必须挂在一个已登记工作空间下** | DSH 一手对照（`host/directory-picker-browse` 的 list/createDirectory + 完全限定路径栅栏；`client/ui-directory-picker-browse` 的应用内对话框形态 —— 行号见详案 2.3）；触发：用户 2026-11-10 定 | `doc/plan/workspace.md`（**已定案**：16 条决策 + 设计 4.1–4.12 + 验收 5.1–5.3；**旧材料**见 `doc/plan/future-plans.md`） | 见详案 5.1–5.3 | 已纳入 I2 |
+| C6 | **新增工作空间**：应用内目录浏览器（列一层目录 / 新建文件夹 / 面包屑 / 可手输路径）选一个文件夹，它成为一条**工作空间记录**；**每个会话都必须挂在一个已登记工作空间下** | DSH 一手对照（`host/directory-picker-browse` 的 list/createDirectory + 完全限定路径栅栏；`client/ui-directory-picker-browse` 的应用内对话框形态 —— 行号见详案 2.3）；触发：用户 2026-11-10 定 | `doc/plan/workspace.md`（**已定案**：16 条决策 + 设计 4.1–4.12 + 验收 5.1–5.3；**旧材料**见 `doc/plan/future-plans.md`） | 见详案 5.1–5.3 | 已交付 |
 | C51 | **工作空间管理**：侧栏按工作空间分组，**每个组头直接新建会话**；组头菜单 = **重命名 / 打开文件夹 / 删除工作空间**（删记录不删会话） | DSH 的 workspace 注册表模型（`docs/subsystems/workspace.zh.md`：稳定 id + canonical path + 显示标题 + 会话归属校验）；触发：用户 2026-11-10 定「每个工作空间可以重命名、删除工作区、打开对应的文件夹」「每个工作空间的新增属于自己的会话」。⚠️ 视觉形态已拍板：`workspace/prototype-workspace.html` | `doc/plan/workspace.md`（设计 4.2b / 4.2d / 4.4 / 4.7b） | 见详案 5.1–5.2（I9–I11） | 已交付 |
 | C27 | **刷新后重连正在跑的 run**（2026-09-14 从「条件触发」**升为排期项**）：runStore 是内存态，刷新即丢 —— **在作品里是明显短板** | opencode `Session Runtime` 形态（run 与 POST 连接**解耦** + 可重连订阅）；对照我们的 `app/lib/run-store.ts`（内存态 zustand） | `doc/plan/c27-run-reconnect.md`（材料已归位 · 未定案） | — | 未开始 |
 | C31 | **输入框改造**：纯文本 `<textarea>` → 结构化输入（片段模型 + 行内 chip）。用户 2026-09-16 提；须拍 **甲 / 乙 / 丙** + 与 C8·C14 的先后 | **待侦察**（DSH Web / opencode / codex / pi 的输入台 —— 尚未读过） | `doc/plan/c31-input-editor.md`（材料已归位 · 未定案） | — | 未开始 |
@@ -254,6 +254,7 @@
 | C52 | **删掉审批侧车 `approval.jsonl`**：审批决策已经逐条进轨迹（`tool_permission` 事件），侧车**只有人写、没人读** ⇒ 删模块 + 两处写入 + `delete()` 里的侧车分支 | 证据：`loadApprovalReceipts` / `replayApprovalReceipts` 的调用者只有测试；引擎在 `lib/agent/index.ts:271` 发 `tool_permission`；触发：用户 2026-11-10「我都有 trace 了，为啥还要 approval.jsonl」 | `doc/plan/workspace.md`（决策 16 + 4.12） | 见详案 5.1 / I5 | 已交付 |
 | C53 | **技能加载改成两阶段**：清单阶段只读 frontmatter（name + description），同名覆盖在清单层判；**选中之后**才读正文 + 递归列文件；`skill` 工具不再为 1 个技能全量扫 | 实测（2026-11-11，本机热缓存、每技能 17 文件）：30 技能 6.5ms / 300 技能 63ms / 1200 技能 ≈250ms，而**每条消息**都付一次；而清单只用到 name+desc。触发：用户「我一直以为咱们是只取 name+desc、选中再取详情」——现状是一次全读 | `doc/plan/c8-skills.md`（补记 12） | — | 未开始 |
 | C54 | **技能清单的规模上限与检索**：清单变大时不截断，改成「共有 N 个，用检索找」；面板的模糊匹配同时看 description（现在只看 name/aliases） | 实测：1200 技能清单 ≈77k 字符（每轮都付 token），而前端模糊匹配 1200 条只要 152µs ⇒ 瓶颈在 token 不在过滤；⚠️ 上限只能封「给模型看的那一份」，扫描层与面板快照必须全量，否则模糊匹配会搜不到被截掉的技能 | `doc/plan/c8-skills.md`（补记 12） | — | 未开始 |
+| C55 | **越界 → 危险操作审批接线（4.6）**：模型读写工作空间外的文件时从「围栏直接抛错」改成「**先问人**」—— 危险样式弹框、列绝对路径、批准后**一次性**放行；只读 `bash` 命中越界痕迹时不再静默自动放行 | 三个纯函数早已落地并测过（27 条，`8122f3e`），但**接线**在 4.15 的 commit 切分里没有落点 ⇒ 详案 4.6 的 I4 验收过不了（详见 `doc/plan/tool-escape-approval.md` 2.3） | `doc/plan/tool-escape-approval.md`（已定案：数据流 + 判定顺序 + 逐文件契约 + 两期切分） | 见该文件 5.1 / 5.2 | 未开始 |
 
 #### 7.3.4 项目级事项（不属于任何功能/优化）
 

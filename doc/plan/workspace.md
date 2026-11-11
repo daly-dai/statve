@@ -648,4 +648,5 @@ export async function bootstrapWorkspaces(home: string, sessionCwds: string[]): 
   2. `tool_permission_request` 帧还没有 danger 字段；审批弹框没有"危险样式 + 绝对路径 + 仍要执行"
   3. `resolveInsideWorkspace` 还不消费一次性通行证 ⇒ 即使人批准了，工具仍会抛"路径越界"
   4. `approve` 路由还不会 grant
-- **为什么会漏**：详案 4.15 的 10 个 commit 切分里没有"4.6 接线"这一项（4 切成"纯函数 + 单测"之后，接线被写进了 5.1 的备注"下一步接线时才做"，但那个"下一步"没落到任何 commit 上）。⇒ **记在这里，别当成已经做完。**
+- **为什么会漏**：详案 4.15 的 10 个 commit 切分里没有"4.6 接线"这一项（4 切成"纯函数 + 单测"之后，接线被写进了 5.1 的备注"下一步接线时才做"，但那个"下一步"没落到任何 commit 上）。
+- **2026-11-11 处理**：已**拆出为池子 C55**，改造方案见 `doc/plan/tool-escape-approval.md`（数据流 / 判定顺序 / 逐文件契约 / 两期切分）。因此 C6 按池子原文范围标 `已交付`，I4 的越界部分随 C55 交付。
