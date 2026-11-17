@@ -20,13 +20,14 @@ export function createEditTool(
   return {
     name: "edit_file",
     description:
-      "用「唯一原文 → 新文」替换文件内容；oldText 必须在文件中唯一出现（找不到或多处都报错，让模型修正）。",
+      "用「唯一原文 → 新文」替换文件内容；oldText 必须在文件中唯一出现（找不到或多处都报错，让模型修正）。默认在工作空间内；确实需要改外面的文件时，可以用绝对路径提出（会先向人确认，且只放行这一次）。",
     parameters: {
       type: "object",
       properties: {
         path: {
           type: "string",
-          description: "工作区下的相对文件路径。",
+          description:
+            "文件路径：工作空间内用相对路径；需要工作空间外时用绝对路径（会走一次人工确认）。",
         },
         oldText: {
           type: "string",

@@ -16,7 +16,7 @@ export function createFindTool(
   return {
     name: "find",
     description:
-      "按文件名模式查找文件（支持 * 通配符），返回工作区内的相对路径。",
+      "按文件名模式查找文件（支持 * 通配符），返回相对路径（工作空间内）或绝对路径（工作空间外）。默认在工作空间内；确实需要查外面时，可以用绝对路径作为起点提出（会先向人确认）。",
     parameters: {
       type: "object",
       properties: {
@@ -26,7 +26,8 @@ export function createFindTool(
         },
         path: {
           type: "string",
-          description: "搜索起点目录（工作区内），默认 '.'。",
+          description:
+            "搜索起点目录：工作空间内用相对路径，默认 '.'；需要工作空间外时用绝对路径（会走一次人工确认）。",
         },
       },
       required: ["pattern"],

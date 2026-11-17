@@ -16,7 +16,8 @@ export function createGrepTool(
 ): RegisteredTool {
   return {
     name: "grep",
-    description: "在工作区内按正则表达式搜索文件内容，返回 路径:行号:匹配行。",
+    description:
+      "按正则表达式搜索文件内容，返回 路径:行号:匹配行。默认在工作空间内；确实需要搜工作空间外时，可以用绝对路径作为起点提出（会先向人确认）。",
     parameters: {
       type: "object",
       properties: {
@@ -26,7 +27,8 @@ export function createGrepTool(
         },
         path: {
           type: "string",
-          description: "搜索起点目录（工作区内），默认 '.'。",
+          description:
+            "搜索起点目录：工作空间内用相对路径，默认 '.'；需要工作空间外时用绝对路径（会走一次人工确认）。",
         },
         maxResults: {
           type: "number",
