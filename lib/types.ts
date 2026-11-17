@@ -7,6 +7,17 @@
 
 // --- 内容块 ---
 
+/**
+ * 新会话的默认标题（2026-11-17 用户定）。
+ *
+ * 三处共用同一个字符串，所以放在协议层（`lib/types.ts` 无 node 依赖，前后端都能引）：
+ *   ① 服务端建会话时写进文件头（`lib/session/manager` 的 `create`）；
+ *   ② 服务端在"用户发出第一条消息"后判断还能不能自动改名（`adoptFirstMessageAsTitle`）；
+ *   ③ 前端判断"这还是一个新会话，右栏不显示标题"（`app/page.tsx`）。
+ * 分成两处写就会出现"服务端叫新会话、前端认不出"的漂移。
+ */
+export const DEFAULT_SESSION_TITLE = "新会话";
+
 export type TextContent = {
   type: "text";
   text: string;

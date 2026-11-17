@@ -27,6 +27,7 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import type { SessionEntry } from "../../types";
+import { DEFAULT_SESSION_TITLE } from "../../types";
 import { messageText } from "../../message";
 import { config } from "../../config";
 import { JsonlSessionStore } from "../store";
@@ -42,8 +43,9 @@ import {
  * 新会话的默认标题（2026-11-17 用户定）。
  * 用户发出第一条消息后由 `adoptFirstMessageAsTitle` 换成那句话；
  * 所以这个字符串同时是"默认名"，也是"还可以被自动改名"的判据。
+ * ⚠️ 定义在 `lib/types.ts`（协议层，前端也要用它判断"这是不是新会话"）。
  */
-export const DEFAULT_SESSION_TITLE = "新会话";
+export { DEFAULT_SESSION_TITLE };
 
 /** 自动标题最多几个字（侧栏一行本来就会省略，这里只挡"整段话塞进文件头"） */
 const TITLE_MAX_CHARS = 30;
