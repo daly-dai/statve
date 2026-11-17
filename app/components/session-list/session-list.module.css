@@ -109,11 +109,13 @@
 }
 
 /* 当前会话：状态类故意全局（JSX 拼 is-current）。
-   ⚠️ 2026-11-17 用户改：**只要面、不要边** —— 原先是"面 + 1px --line 细环"，
-   看起来是带边框的卡片；现在是从侧栏最左到最右的一条色带。 */
+   ⚠️ 2026-11-17 用户两次改：① **只要面、不要边**（原来配 1px --line 细环，像带框的卡片）
+   ② 底色**不够明显**，换成 `--feed-selected`（同一支墨 9%，≈ #e6e6e7）。
+   原来用的是 `--plate` —— 一块"面"，而面和侧栏底都是白的 ⇒ 选中等于没选中。
+   六档候选的对比 demo 见 `workspace/prototype-sidebar-highlight-v5.html`。 */
 .sessionItem:global(.is-current) {
-  /* c35-allow: 这是「当前项的面」，不是反馈 —— 但**不再**配边框（用户 2026-11-17 定） */
-  background: var(--plate);
+  /* c35-allow: 这是「当前项的面」，不是反馈 —— 但取的是 --feed-selected（不是 --plate） */
+  background: var(--feed-selected);
 }
 
 .sessionTitle {
