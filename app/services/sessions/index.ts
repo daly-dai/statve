@@ -17,6 +17,7 @@ import type {
   CreateSessionResult,
   RenameSessionParams,
   OkResult,
+  DiscardResult,
 } from "./types";
 
 /** GET /api/sessions —— 会话列表 */
@@ -41,6 +42,16 @@ export function renameSession(params: RenameSessionParams): Promise<OkResult> {
 /** DELETE /api/sessions?id= —— 删除整个会话 */
 export function removeSession(id: string): Promise<OkResult> {
   return api(`/api/sessions?id=${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+/**
+ * DELETE /api/sessions?id=…&ifEmpty=1 —— **只有空才删**。
+ * 返回 `deleted:false` 表示里面有内容、一个字节没动（不是错误）。
+ */
+export function discardEmptySession(id: string): Promise<DiscardResult> {
+  return api(`/api/sessions?id=${encodeURIComponent(id)}&ifEmpty=1`, {
     method: "DELETE",
   });
 }

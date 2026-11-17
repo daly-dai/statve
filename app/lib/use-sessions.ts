@@ -22,6 +22,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   listSessions,
   createSession,
+  discardEmptySession,
   renameSession,
   removeSession,
 } from "@/app/services/sessions";
@@ -33,6 +34,8 @@ import type { SessionSummary } from "@/app/services/sessions/types";
 
 export function useSessions() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  // 会话根（页脚展示）：由服务端给，前端不自己拼（STATVE_HOME 可覆盖）
+  const [sessionsRoot, setSessionsRoot] = useState("");
   const [currentId, setCurrentId] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -43,6 +46,7 @@ export function useSessions() {
         const data = await listSessions({ signal });
         const list = data.sessions ?? [];
         setSessions(list);
+        if (data.sessionsRoot) setSessionsRoot(data.sessionsRoot);
         return list;
       } catch (e) {
         if ((e as Error).name === "AbortError") return []; // 组件卸载导致的取消
@@ -76,9 +80,11 @@ export function useSessions() {
   }, []);
 
   const create = useCallback(
-    async (title?: string) => {
+    async (workspaceId: string, title?: string) => {
       try {
-        const data = await createSession(title ? { title } : {});
+        const data = await createSession(
+          title ? { workspaceId, title } : { workspaceId },
+        );
         setCurrentId(data.id); // 新建即切换
         await refresh();
         return data.id;
@@ -88,6 +94,26 @@ export function useSessions() {
     },
     [refresh],
   );
+
+  /**
+   * 丢掉一条**空**会话（"建了没用"的那条）。
+   *
+   * 服务端会再判一次（`?ifEmpty=1`）：如果里面已经有消息，它**一个字节都不删**，
+   * 这里拿到 `deleted:false` 就什么都不做 —— 客户端的"空"可能是过期视图。
+   * 真删掉时本地立刻去掉那一行，避免"行还在、点进去 404"。
+   */
+  const discardEmpty = useCallback(async (id: string) => {
+    if (!id) return false;
+    try {
+      const { deleted } = await discardEmptySession(id);
+      if (deleted) {
+        setSessions((prev) => prev.filter((item) => item.id !== id));
+      }
+      return deleted;
+    } catch {
+      return false; // 清理是可选动作，失败不打扰用户
+    }
+  }, []);
 
   const rename = useCallback(
     async (id: string, title: string) => {
@@ -125,11 +151,13 @@ export function useSessions() {
 
   return {
     sessions,
+    sessionsRoot,
     currentId,
     loading,
     refresh,
     select,
     create,
+    discardEmpty,
     rename,
     remove,
   };

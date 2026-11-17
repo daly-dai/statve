@@ -5,10 +5,14 @@
 import { rm, stat } from "node:fs/promises";
 import { relative } from "node:path";
 import type { RegisteredTool } from "../types";
+import type { EscapePermits } from "../../permission/tool-escape";
 import { resolveInsideWorkspace, stringArg } from "../path-utils";
 import { text } from "../../message";
 
-export function createDeleteTool(workspaceRoot: string): RegisteredTool {
+export function createDeleteTool(
+  workspaceRoot: string,
+  permits?: EscapePermits,
+): RegisteredTool {
   return {
     name: "delete_file",
     description: "删除工作区内的一个文件（不可逆；调用前会弹框请你确认）。",
@@ -26,6 +30,7 @@ export function createDeleteTool(workspaceRoot: string): RegisteredTool {
       const filePath = resolveInsideWorkspace(
         workspaceRoot,
         stringArg(args.path, ""),
+        permits,
       );
 
       const info = await stat(filePath).catch(() => null);

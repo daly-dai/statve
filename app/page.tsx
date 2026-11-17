@@ -61,6 +61,9 @@ import { useAgentRun } from "./lib/use-agent-run";
 import { useRunStore } from "./lib/run-store";
 import { useCommandMenu } from "./lib/use-command-menu";
 import { useSessions } from "./lib/use-sessions";
+import { useWorkspaces } from "./lib/use-workspaces";
+import { groupSessions } from "./lib/session-groups";
+import { DirectoryBrowser } from "./components/directory-browser";
 import { useStickyScroll } from "./lib/use-sticky-scroll";
 import { useTraces } from "./lib/use-traces";
 import { formatTokens } from "./lib/format";
@@ -72,8 +75,39 @@ export default function Home() {
   // 会话栏（Phase 2）：列表 + 当前会话 id。currentId 传给 useAgentRun，
   // 切换会话 = 换 currentId，聊天区随之清空并加载对应历史。
   // refresh 额外用于"run 结束后列表保鲜"（见下方 loading 跳变 effect）
-  const { sessions, currentId, select, create, rename, remove, refresh } =
-    useSessions();
+  const {
+    sessions,
+    sessionsRoot,
+    currentId,
+    select,
+    create,
+    discardEmpty,
+    rename,
+    remove,
+    refresh,
+  } = useSessions();
+
+  // 工作空间（C51）：侧栏的分组依据。它就是"会话属于哪个文件夹"的唯一来源 ——
+  // 会话头里的 cwd 与这里的 path 相等，所以两边必须来自同一个规范化路径。
+  const {
+    workspaces,
+    error: workspaceError,
+    setError: setWorkspaceError,
+    create: createWorkspace,
+    rename: renameWorkspace,
+    remove: removeWorkspace,
+    open: openWorkspace,
+  } = useWorkspaces();
+
+  // 分组是纯函数算的（app/lib/session-groups，node 可测），页面不做逻辑
+  const groups = useMemo(
+    () => groupSessions(sessions, workspaces),
+    [sessions, workspaces],
+  );
+
+  // 「选文件夹」对话框：打开时清掉上一次的错误（否则旧的红字会挂在新对话框里）
+  const [browserOpen, setBrowserOpen] = useState(false);
+  const [browserBusy, setBrowserBusy] = useState(false);
 
   // hook：一次 run 的观测状态和行为。页面从这里拿数据，不再自己发 fetch。
   //   messages  转录稿消息（当前会话历史 + 本次 run 新增）
@@ -113,6 +147,11 @@ export default function Home() {
     setError,
   } = useAgentRun(currentId);
 
+  // 输入台能不能用：没有会话就**不能发**（以前只看 loading，于是"新增了工作空间
+  // 但还没会话"时输入框照样能打字，回车打到 `sessionId=""` 上 ⇒ 404「会话不存在」）。
+  const hasSession = Boolean(currentId);
+  const composerDisabled = loading || !hasSession;
+
   // 输入控制台 + 命令面板（C13 拆出）：input 状态/快照/过滤/键盘导航/
   // pick/submit 的命令分支全在 hook 里，页面只接线（use-command-menu.ts）。
   const {
@@ -136,8 +175,20 @@ export default function Home() {
     onSend: send,
     onError: setError,
     sessionId: currentId,
-    disabled: loading,
+    disabled: composerDisabled,
   });
+
+  /**
+   * 丢掉"建了没用"的当前会话（就是新增工作空间时自动建的那条）。
+   *
+   * 什么时候调：**离开它之前** —— 切到别的会话、在当前工作空间里新建会话、
+   * 或者又新增了一个工作空间。判据只有"这条会话现在一条消息都没有"；
+   * 服务端 `?ifEmpty=1` 会以磁盘为准再确认一次（有内容一个字节都不动）。
+   */
+  const discardUntouched = useCallback(() => {
+    if (!currentId || messages.length > 0) return;
+    void discardEmpty(currentId);
+  }, [currentId, messages.length, discardEmpty]);
 
   // 审批模式（B1-②）：页面挂载时读服务端当前值；切换调接口（运行时生效，
   // 重启恢复 config 默认）。参考项目都有此入口（pi /settings、DSH /permission）
@@ -235,13 +286,22 @@ export default function Home() {
       <Nameplate runId={runId} model={model} phase={phase} turn={turn} />
 
       <div className="deck">
-        {/* 左侧会话栏（Phase 2）：点击切换 / ＋新建 / ⋯ 重命名·删除 */}
+        {/* 左侧工作空间栏（C49/C51）：分组 / 组头新建会话 / 组头菜单三件事 */}
         <SessionList
-          sessions={sessions}
+          groups={groups}
+          totalSessions={sessions.length}
+          sessionsRoot={sessionsRoot}
+          workspaces={workspaces}
           currentId={currentId}
-          onSelect={select}
-          onCreate={() => {
-            create();
+          onSelect={(id) => {
+            // 离开一条空会话（自动建的那条）之前先把它丢掉，侧栏不留噪音
+            if (id !== currentId) discardUntouched();
+            select(id);
+          }}
+          onCreateSession={(workspaceId) => {
+            // 换一条会话 = 也要离开当前这条；空的话一起丢掉
+            discardUntouched();
+            create(workspaceId);
           }}
           onRename={(id, title) => {
             rename(id, title);
@@ -250,6 +310,24 @@ export default function Home() {
             // B22：删会话 = 服务端删除 + 本地清桶（abort 在跑流，帧不再写）
             useRunStore.getState().deleteRun(id);
             remove(id);
+          }}
+          onCreateWorkspace={() => {
+            setWorkspaceError(null);
+            setBrowserOpen(true);
+          }}
+          onRenameWorkspace={(workspace, title) => {
+            renameWorkspace(workspace.id, title);
+          }}
+          onOpenWorkspaceFolder={(workspace) => {
+            openWorkspace(workspace.id);
+          }}
+          onDeleteWorkspace={(workspace) => {
+            // 删工作空间 = 记录 + 它名下的会话一起删（用户 2026-11-11 定的"粗暴"语义），
+            // 所以删完必须重拉会话列表，否则侧栏还挂着已经不存在的行
+            removeWorkspace(workspace.id).then((deleted) => {
+              if (deleted === null) return;
+              refresh();
+            });
           }}
         />
 
@@ -432,8 +510,8 @@ export default function Home() {
                   onChange={(e) => handleInputChange(e.target.value)}
                   onKeyDown={handleKeyDown}
                   onBlur={handleBlur}
-                  placeholder="给它一个目标，例如：读取 agent-notes.md 并总结要点"
-                  disabled={loading}
+                  placeholder={composerPlaceholder(hasSession)}
+                  disabled={composerDisabled}
                   autoFocus
                 />
                 {/* 上下文占用圆环（C13，抄 DSH ContextMeter）：发送按钮旁，
@@ -459,7 +537,7 @@ export default function Home() {
                     <button
                       className={styles.consoleSend}
                       type="submit"
-                      disabled={!input.trim()}
+                      disabled={!input.trim() || !hasSession}
                     >
                       发送
                     </button>
@@ -475,15 +553,56 @@ export default function Home() {
                   {formatTokens(stats.tokens)} token
                 </span>
                 <span className={styles.statusHint}>
-                  Enter 发送 · Shift + Enter 换行 · 每次发送开始新的一次 run
+                  {composerHint(hasSession)}
                 </span>
               </div>
             </form>
           </div>
         </main>
       </div>
+
+      {/* 「新增工作空间」：选一个文件夹 → 登记成记录。只读对话框，见组件头注释。
+          关闭即卸载（条件渲染）：每次打开都是干净实例，不需要"打开时复位"的 effect。 */}
+      {browserOpen ? (
+        <DirectoryBrowser
+          busy={browserBusy}
+          error={workspaceError}
+          onClose={() => setBrowserOpen(false)}
+          onPick={async (path) => {
+            setBrowserBusy(true);
+            const workspace = await createWorkspace(path);
+            if (workspace) {
+              // 新增工作空间 = 换一条会话：先丢掉当前那条空的
+              discardUntouched();
+              // ⭐ 立刻在这个新工作空间里开一条会话并选中（2026-11-17 用户定）：
+              // 不开的话用户会停在"空间建好了、却没地方可以说话"的空档里。
+              // 这条会话若一直没消息，会在离开时/下次打开页面时被清掉（判据在服务端）。
+              await create(workspace.id);
+              // 成功才关：失败（409 已登记 / 400 路径不对）留在对话框里显示原因
+              setBrowserOpen(false);
+            }
+            setBrowserBusy(false);
+          }}
+        />
+      ) : null}
     </div>
   );
+}
+
+// ============ 输入台文案（纯函数，跟着页面走） ============
+
+// 为什么提到模块层：写进 JSX 的三元会把 Home 的圈复杂度顶到 eslint 上限（20），
+// 而这两句就是常量，跟组件状态无关。
+function composerPlaceholder(hasSession: boolean): string {
+  return hasSession
+    ? "给它一个目标，例如：读取 agent-notes.md 并总结要点"
+    : "先在工作空间里开一个会话，再给它目标";
+}
+
+function composerHint(hasSession: boolean): string {
+  return hasSession
+    ? "Enter 发送 · Shift + Enter 换行 · 每次发送开始新的一次 run"
+    : "还没有会话：点左侧工作空间组头的 ＋，或新增一个工作空间（会自动开会话）";
 }
 
 // ============ 状态推导（纯函数，跟着页面走） ============

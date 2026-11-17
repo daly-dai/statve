@@ -3,24 +3,19 @@
 // ============================================================
 //
 // 流程：引擎想执行写/改/删工具 → route.ts 推 tool_permission_request 帧
-// 给前端 → 前端弹框 → 用户点「允许一次/本会话允许/一直允许/拒绝」→
-// 本接口把决定交给挂起的确认，并按选项写记忆（B1-④）。
+// 给前端 → 前端弹框 → 用户点「允许 / 拒绝」→ 本接口把决定交给挂起的确认。
 //
-// body: { toolCallId: string, allow: boolean, session?: boolean,
-//         persist?: boolean, sessionId?: string }
-//   allow=true + session=true  → 本会话内该工具不再询问（内存记忆）
-//   allow=true + persist=true  → 该工具一直允许（持久化规则文件）
+// body: { toolCallId: string, allow: boolean }
+//
+// ⭐ 2026-11-17（C55 补记 14）：body 里不再有 session / persist ——
+// 审批只有一次性（抄 DSH），所以这里**只做三件事**：找到挂起项、按需发
+// 一次性凭据、resolve。没有"写记忆"这一步，这个接口也就没有副作用可记。
 // 找不到挂起的确认（已超时/已处理）→ 404，前端提示「操作已超时」。
 // ============================================================
 
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { toolApprovals } from "@/lib/toolApproval";
-import { config } from "@/lib/config";
-import {
-  rememberSession,
-  rememberPersist,
-} from "@/lib/permission/approval-memory";
 
 export const runtime = "nodejs";
 
@@ -29,12 +24,6 @@ export async function POST(req: NextRequest) {
   const toolCallId =
     typeof body?.toolCallId === "string" ? body.toolCallId : "";
   const allow = body?.allow === true;
-  const sessionOpt = body?.session === true;
-  const persist = body?.persist === true;
-  const sessionId =
-    typeof body?.sessionId === "string" && body.sessionId.trim()
-      ? body.sessionId.trim()
-      : "default";
 
   if (!toolCallId) {
     return NextResponse.json({ error: "缺少 toolCallId" }, { status: 400 });
@@ -53,16 +42,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, allow: false });
   }
 
-  // B1-④ 记忆：按用户选的档位写记忆，再 resolve 对应 outcome
-  if (persist) {
-    await rememberPersist(config.paths.sessions, pending.toolName);
-    pending.resolve("approved-persist");
-  } else if (sessionOpt) {
-    rememberSession(sessionId, pending.toolName);
-    pending.resolve("approved-session");
-  } else {
-    pending.resolve("approved");
-  }
+  // 越界调用：先发一次性凭据，再放行。顺序不能反 —— 反了的话工具会先跑到
+  // 围栏那里、发现没有凭据而抛"路径越界"，用户看到的是"批准了还是失败"。
+  pending.grant?.();
+  pending.resolve("approved");
 
   return NextResponse.json({ ok: true, allow: true });
 }

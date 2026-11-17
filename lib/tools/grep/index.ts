@@ -5,11 +5,15 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { RegisteredTool } from "../types";
+import type { EscapePermits } from "../../permission/tool-escape";
 import { resolveInsideWorkspace, stringArg } from "../path-utils";
 import { listFiles, truncate } from "../shared";
 import { text } from "../../message";
 
-export function createGrepTool(workspaceRoot: string): RegisteredTool {
+export function createGrepTool(
+  workspaceRoot: string,
+  permits?: EscapePermits,
+): RegisteredTool {
   return {
     name: "grep",
     description: "在工作区内按正则表达式搜索文件内容，返回 路径:行号:匹配行。",
@@ -45,6 +49,7 @@ export function createGrepTool(workspaceRoot: string): RegisteredTool {
       const rootDir = resolveInsideWorkspace(
         workspaceRoot,
         stringArg(args.path, "."),
+        permits,
       );
       const maxResults =
         typeof args.maxResults === "number"

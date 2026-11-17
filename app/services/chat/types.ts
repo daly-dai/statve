@@ -19,16 +19,14 @@ export type ChatHistoryResult = {
   contextPressure: ContextPressure;
 };
 
-/** POST /api/chat/approve 参数：回传用户对挂起确认的决定（B1-④ 三档信任） */
+/**
+ * POST /api/chat/approve 参数：回传用户对挂起确认的决定。
+ * ⭐ 2026-11-17 只剩"允许 / 拒绝"（C55 补记 14）：本会话允许 / 一直允许已删 ——
+ * 审批不产生记忆，想整轮不被打断走 `<ApprovalModeSwitch>`。
+ */
 export type ApproveParams = {
   toolCallId: string;
   allow: boolean;
-  /** 本会话允许：该工具本会话内不再询问（内存记忆） */
-  session?: boolean;
-  /** 一直允许：该工具跨会话不再询问（持久化规则） */
-  persist?: boolean;
-  /** 写"本会话允许"记忆时按哪个会话记 */
-  sessionId?: string;
 };
 
 /** POST /api/chat/approve → 成功返回 */

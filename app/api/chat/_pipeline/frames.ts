@@ -38,6 +38,8 @@ export type StreamFrame =
       toolCallId: string;
       toolName: string;
       args: Record<string, unknown>;
+      /** 越界提示（C55）：普通写操作没有这个字段 ⇒ 前端按它换危险样式 */
+      danger?: { kind: "outside-workspace"; targets: string[] };
     }
   // bash 命令的流式输出（旁路帧，不是 AgentEvent）：工具 → 这里 → SSE → 前端
   | { type: "tool_output"; toolCallId: string; text: string }

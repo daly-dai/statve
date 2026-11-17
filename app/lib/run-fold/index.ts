@@ -23,6 +23,8 @@ export type ToolApprovalRequest = {
   toolCallId: string;
   toolName: string;
   args: Record<string, unknown>;
+  /** 越界提示（C55）：有它 = 这次调用越出了工作空间，弹框要更明确 */
+  danger?: { kind: "outside-workspace"; targets: string[] };
 };
 
 /** 一次挂起的模型提问（A4）：前端逐题作答，全部答完后回传 /api/chat/ask-user */
@@ -125,6 +127,21 @@ export function deriveRunPhase(run: RunState): RunPhase {
 
 // ---- 帧折叠 ----
 
+/** 帧 → 弹框内容（越界提示原样带上；没有就不造空字段） */
+function toApprovalRequest(frame: {
+  toolCallId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  danger?: { kind: "outside-workspace"; targets: string[] };
+}): ToolApprovalRequest {
+  return {
+    toolCallId: frame.toolCallId,
+    toolName: frame.toolName,
+    args: frame.args,
+    ...(frame.danger === undefined ? {} : { danger: frame.danger }),
+  };
+}
+
 /**
  * 一帧推进一桶：纯函数，返回新 RunState（不变则返回原引用）。
  * at 是观测时刻，由调用方注入（消费循环里 Date.now()；测试传固定值），
@@ -186,14 +203,7 @@ export function foldRunFrame(
       };
 
     case "tool_permission_request":
-      return {
-        ...state,
-        pendingApproval: {
-          toolCallId: frame.toolCallId,
-          toolName: frame.toolName,
-          args: frame.args,
-        },
-      };
+      return { ...state, pendingApproval: toApprovalRequest(frame) };
 
     case "tool_output":
       // bash 流式输出：按 toolCallId 累积（同一次调用多次到达）

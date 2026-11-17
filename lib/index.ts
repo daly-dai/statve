@@ -48,9 +48,10 @@ export {
   JsonlSessionStore,
   SessionManager,
   isValidSessionId,
+  sessionManager,
   summarizeEntries,
 } from "./session";
-export type { SessionSummary } from "./session";
+export type { SessionLocation, SessionSummary } from "./session";
 
 // 工具系统（子模块门面：lib/tools/index.ts）
 export { ToolRegistry, createToolRegistry } from "./tools";
@@ -59,6 +60,19 @@ export type { ToolContext } from "./tools";
 // 压缩总结（B2：真摘要生成）
 export { generateSummary } from "./summarize";
 
+// 越界判定与一次性通行证（C55）：围栏与审批共用这一份判据
+export {
+  classifyEscape,
+  createEscapePermits,
+  inspectPath,
+  isInside,
+} from "./permission/tool-escape";
+export type {
+  EscapeClass,
+  EscapePermits,
+  EscapeVerdict,
+} from "./permission/tool-escape";
+
 // 运行控制 / 轨迹 / 审批 / 提问（内核侧状态与能力）
 export { runControllers } from "./runControl";
 // 轨迹（A3）：TraceRecorder 写；readTrace / readTraceMeta 读单个文件；
@@ -66,7 +80,6 @@ export { runControllers } from "./runControl";
 export { TraceRecorder, readTrace, readTraceMeta } from "./trace";
 export type { TraceEntry, TraceMeta } from "./trace";
 export { listTraceFiles } from "./trace-files";
-export type { TraceFile } from "./trace-files";
 export { getApprovalMode, setApprovalMode } from "./approvalMode";
 export { toolApprovals } from "./toolApproval";
 export { userAnswers, makeAskKey, clearRun } from "./userAnswers";

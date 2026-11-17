@@ -1,5 +1,5 @@
 /* ============================================================
-   approval-dialog.module.css —— 审批卡片（Phase 3 + B1-④）
+   approval-dialog.module.css —— 审批卡片（Phase 3；C55 补记 14 砍到两档）
    归属组件：app/components/approval-dialog/index.tsx
    布局抄 Reasonix 确认卡片：
    header（警告图标+标题）→ subject（工具+参数代码块）→
@@ -122,7 +122,7 @@
   background: var(--plate);
 }
 
-/* 允许系（Y/A/P）：主色浅底 + 主色字 + 主色描边（信任是用户给的） */
+/* 允许（Y）：主色浅底 + 主色字 + 主色描边（信任是用户给的） */
 .approvalAllow {
   background: rgba(47, 75, 153, 0.08);
   color: var(--pen-user);
@@ -145,4 +145,53 @@
   ); /* C35：原来借的是「面」（--plate），白底画白 */
   color: var(--pen-error);
   border-color: var(--pen-error);
+}
+
+/* 去向说明（2026-11-17）：审批不再有"记住这个工具"的档位，
+   想整轮不打断只剩审批模式一个开关。这行只做指路，不抢按钮的视觉重量
+   —— 所以用最小的字号 + 最淡的墨色，且不参与按钮的命中区。 */
+.approvalHint {
+  margin: 8px 0 0;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-faint);
+}
+
+/* ---- 越界（C55）：这张卡比普通审批更危险，配色用 error 红 ----
+   为什么不用新的色相：项目里"危险"已经有唯一语义色（--pen-error，
+   删除确认条同款）。加一个新颜色 = 多一个要维护的含义。 */
+.danger {
+  border-color: var(--pen-error);
+}
+
+.danger .approvalIcon {
+  color: var(--pen-error);
+}
+
+.dangerNote {
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--pen-error);
+  border-radius: var(--r);
+  background: var(--paper);
+}
+
+.dangerLead {
+  margin: 0 0 6px;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+/* 绝对路径必须能一眼看清（用户要判断"这个路径认不认识"） */
+.dangerTargets {
+  margin: 0;
+  padding-left: 18px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--pen-error);
+  word-break: break-all;
 }

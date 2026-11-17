@@ -152,9 +152,11 @@ export function SessionRow({
         <div className={styles.sessionTitle}>
           {session.title ?? session.preview ?? "未命名会话"}
         </div>
-        {session.title && session.preview && (
-          <div className={styles.sessionPreview}>{session.preview}</div>
-        )}
+        {session.title &&
+          session.preview &&
+          session.preview !== session.title && (
+            <div className={styles.sessionPreview}>{session.preview}</div>
+          )}
         <div className={styles.sessionMeta}>
           {/* B22 状态点：只显示非当前会话（当前会话主体界面已有状态展示）。
               派生规则（用户拍板 2026-09-02）：
