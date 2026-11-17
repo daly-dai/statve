@@ -16,13 +16,15 @@ export function createWriteTool(
 ): RegisteredTool {
   return {
     name: "write_file",
-    description: "在工作区内写一个文件（不存在则创建，父目录自动创建）。",
+    description:
+      "写一个文件（不存在则创建，父目录自动创建）。默认写在工作空间内；确实需要写到外面时，可以用绝对路径提出（会先向人确认，且只放行这一次）。",
     parameters: {
       type: "object",
       properties: {
         path: {
           type: "string",
-          description: "工作区下的相对文件路径。",
+          description:
+            "文件路径：工作空间内用相对路径；需要工作空间外时用绝对路径（会走一次人工确认）。",
         },
         content: {
           type: "string",

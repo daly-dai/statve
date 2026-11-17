@@ -16,13 +16,15 @@ export function createReadTool(
 ): RegisteredTool {
   return {
     name: "read_file",
-    description: "读取安全工作区内的 UTF-8 文本文件。",
+    description:
+      "读取一个 UTF-8 文本文件。默认在工作空间内；确实需要工作空间外的文件时，可以直接用绝对路径提出（会先向人确认，且只放行这一次）。",
     parameters: {
       type: "object",
       properties: {
         path: {
           type: "string",
-          description: "工作区下的相对文件路径。",
+          description:
+            "文件路径：工作空间内用相对路径；需要工作空间外时用绝对路径（会走一次人工确认）。",
         },
       },
       required: ["path"],
