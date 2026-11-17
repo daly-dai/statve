@@ -9,26 +9,31 @@
   /* ⚠️ 列宽必须能收缩：默认 auto 会取内容的最小宽度（会话标题是 nowrap），
      一条长标题就能把侧栏撑到 367px、横向溢出裁掉右边 */
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  /* 2026-11-17：页脚（共 N 个会话 / 数据根…）整块删掉 → 只剩「头部 + 列表」两行 */
+  grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   background: var(--recorder);
-  border-right: 1px solid var(--line); /* 分界主力是 --recorder 那档底色差，线只做收边 */
+  /* 竖线改画在 .leftColumn 上（品牌行也要有这条线），这里不再画 */
 }
 
+/* 「工作空间」这一行（2026-11-17）：44 → **34px**，去掉下面那条分隔线，
+   加号换成"文件夹-加号"图标（18px，命中 24×24） */
 .sidebarHead {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--line-soft);
+  gap: 8px;
+  height: var(--hit);
+  padding: 0 8px 0 14px;
+  background: var(--recorder);
 }
 
 .sidebarTitle {
   font-family: var(--font-mono);
-  font-size: 13px; /* V2：12 → 13 */
-  letter-spacing: 0.08em;
-  color: var(--ink);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: var(--ink-mid);
+  text-transform: uppercase;
 }
 
 /* 侧栏头部的 ＋：新增**工作空间**（不是新增会话 —— 新增会话在每组组头） */
@@ -43,7 +48,6 @@
   border-radius: var(--r);
   background: transparent;
   color: var(--ink-mid);
-  font-size: 15px;
   line-height: 1;
   cursor: pointer;
 }
@@ -57,32 +61,12 @@
   overflow-y: auto;
   min-height: 0;
   min-width: 0;
-  padding: 10px;
+  /* 左右不留白（2026-11-17 用户定）：当前会话要**整行**高亮到侧栏两边。
+     行自己用负的左边距吃掉 workspace-group 的 12px 缩进，见 .sessionItem */
+  padding: 0 0 8px;
 }
 
-.emptyGroup {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: var(--hit);
-  margin: 2px 0;
-  padding: 0 10px 0 4px;
-  border: 1px dashed var(--line);
-  border-radius: var(--r);
-  background: transparent;
-  font-family: var(--font-sans);
-  font-size: 12.5px;
-  color: var(--ink-mid);
-  text-align: left;
-  cursor: pointer;
-}
-
-.emptyGroup:hover {
-  border-color: var(--line-strong);
-  background: var(--feed-hover);
-  color: var(--ink);
-}
+/* 「在这里开第一个会话」那一行已删（2026-11-17：空组只剩组头，点组头 ＋ 建） */
 
 .sessionEmpty {
   padding: 14px 8px;
@@ -91,12 +75,30 @@
   color: var(--ink-faint);
 }
 
+/* 一行会话（2026-11-17，C56 密度那一半）
+   ============================================================
+   原型 `workspace/prototype-workspace.html` 的 `.row` 本来就是**一行**：
+   [状态点] 标题 ……………… 时间（靠右）。实现漂成了三行（标题 / 预览 / 时间），
+   实测一行 60–80px ⇒ 侧栏装不下几个会话。这里按原型收回来：
+   单行 + 34px 命中区（`--hit`）+ 悬停时时间让位给 ⋯。
+   ⚠️ 预览（第一条消息摘要）不再单独占一行 —— 标题本来就是"标题 ?? 预览"，
+   没改过名的会话照样看得到那句话。
+
+   ⚠️ 2026-11-17 第二轮（用户定）：**高亮要贴边、不要边框**。
+   这行现在是"满宽的色带"，不是一块"药丸"：
+     · 去掉 border / border-radius（原先是 1px 透明边 + 圆角，看着像小卡片）
+     · 左边距 -12px 吃掉 `workspace-group > .body` 的 12px 缩进 ⇒ 色带从侧栏
+       最左边开始；右侧本来就没有内边距 ⇒ 色带正好到右边
+     · 文字仍缩进 32px：18px 给状态点留位（点绝对定位、不参与排布），
+       点占 18–24，之后 8px 才是标题 */
 .sessionItem {
   position: relative;
-  margin-bottom: 6px;
-  padding: 12px 14px;
-  border: 1px solid transparent;
-  border-radius: var(--r);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--hit);
+  margin: 0 0 1px -12px;
+  padding: 3px 10px 3px 32px;
   cursor: pointer;
 }
 
@@ -106,98 +108,123 @@
   ); /* C35：原来借「面」（--paper）——在侧栏上是"变亮"，与仓库页的"变暗"方向相反 */
 }
 
-/* 当前会话：状态类故意全局（JSX 拼 is-current） */
+/* 当前会话：状态类故意全局（JSX 拼 is-current）。
+   ⚠️ 2026-11-17 用户改：**只要面、不要边** —— 原先是"面 + 1px --line 细环"，
+   看起来是带边框的卡片；现在是从侧栏最左到最右的一条色带。 */
 .sessionItem:global(.is-current) {
-  /* c35-allow: 这是「当前项的面」+ 边，不是反馈 —— 原型 prototype-statve-shell.html 的
-     .sess.on 同款（面 + inset 细环）；反馈档管的是悬停 / 键盘当前项。 */
+  /* c35-allow: 这是「当前项的面」，不是反馈 —— 但**不再**配边框（用户 2026-11-17 定） */
   background: var(--plate);
-  border-color: var(--line);
 }
 
 .sessionTitle {
+  /* 单行：占满剩余宽度，超出省略（时间/⋯ 在右边，所以不再留 padding） */
+  flex: 1 1 auto;
+  min-width: 0;
   font-family: var(--font-mono);
-  font-size: 13.5px; /* V2：12 → 13.5 */
+  font-size: 13px;
   color: var(--ink);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  /* 给右上角 ⋯ 按钮留位，标题不会被它盖住 */
-  padding-right: 32px;
 }
 
-.sessionPreview {
-  margin-top: 3px;
-  font-family: var(--font-sans);
-  font-size: 12.5px; /* V2：11 → 12.5 */
-  color: var(--ink-mid);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.sessionMeta {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 4px;
+/* 时间常驻右侧（原型 `.clock`：等宽、最淡、靠右）。
+   ⋯ 是它右边的一格（见下），两者不叠层，所以时间不用淡出。 */
+.sessionTime {
+  flex: none;
+  margin-left: auto;
   font-family: var(--font-mono);
-  font-size: 12px; /* V2：11 → 12（§10.5 口径） */
+  font-size: 12px;
   color: var(--ink-faint);
 }
 
-/* B22 会话状态点：视觉三态全由 data-phase 驱动（B20：状态派生移到 CSS，
-   JS 只写语义属性，不写颜色/动画）。三色三义（2026-09-02 二次调整：
-   running 原用琥珀呼吸，与 waiting 黄点同色难区分且不显眼——改深墨呼吸，
-   浅灰背景上墨点呼吸最醒目）：
-     running            → 深墨呼吸点（活跃执行中，动 = 活着）
-     waiting-approval/ask → 琥珀黄点（静置：等你操作，与呼吸区分开）
-     done               → 绿点（跑完）
-   idle/error 不渲染（JSX 已过滤） */
+/* 会话状态点（2026-11-17 第二轮：判定换了，样子没换）
+   ============================================================
+   四种形态（CSS 只认 `data-dot`，**不要再用 phase 当属性名** —— 它已经不是
+   `RunPhase` 了，结局那两态由"阅读位置"算出来，见 `app/lib/session-dot`）：
+     running  → **转圈**：10px 圆环、2px 边、一段深色
+     waiting  → **黄点**（--pen-signal：卡住等你确认，批准/回答都算）
+     done     → **蓝点**（借 --pen-user：项目里唯一的蓝，不新增色相）
+     error    → **红点**（--pen-error：你离开期间那次 run 失败了）
+   "none" 不渲染（JSX 已过滤）。
+   ⚠️ 当前选中的那一行不显示点 —— 连"在跑"也不显示（比参考项目严，见详案八.8）。 */
 .sessionDot {
-  width: 8px;
-  height: 8px;
+  /* 绝对定位：不占 flex 位，所以"有状态点 / 没有状态点"的行标题不会错位。
+     左 18px = 12（组的缩进）+ 6（离色带边的留白）；点占 18–24，
+     标题从 32 开始 ⇒ **8px 间隔**（2026-11-17 用户提：原来点和标题是贴着的） */
+  position: absolute;
+  left: 18px;
+  top: calc(50% - 3px);
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  flex-shrink: 0;
 }
 
-.sessionDot[data-phase="running"] {
-  background: var(--ink);
-  animation: dot-breathe 0.9s ease-in-out infinite;
+/* 进行中：转圈。用 border 画环、只给上边染色，转起来就是 loading。
+   左 16px + 10px 宽 ⇒ 16–26，圆心与 6px 的点一致（21） */
+.sessionDot[data-dot="running"] {
+  left: 16px;
+  top: calc(50% - 5px);
+  width: 10px;
+  height: 10px;
+  background: transparent;
+  border: 2px solid var(--line-strong);
+  border-top-color: var(--ink);
+  animation: dot-spin 0.9s linear infinite;
 }
 
-.sessionDot[data-phase="waiting-approval"],
-.sessionDot[data-phase="waiting-ask"] {
+.sessionDot[data-dot="waiting"] {
   background: var(--pen-signal);
 }
 
-.sessionDot[data-phase="done"] {
-  background: var(--pen-model);
+.sessionDot[data-dot="done"] {
+  background: var(--pen-user);
 }
 
-@keyframes dot-breathe {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
+.sessionDot[data-dot="error"] {
+  background: var(--pen-error);
+}
+
+@keyframes dot-spin {
+  to {
+    transform: rotate(360deg);
   }
-  50% {
-    opacity: 0.35;
-    transform: scale(0.72);
+}
+
+/* 减少动态偏好：转慢一点，但仍然转（静止的环看起来像"卡住了"） */
+@media (prefers-reduced-motion: reduce) {
+  .sessionDot[data-dot="running"] {
+    animation-duration: 2.4s;
   }
 }
 
 /* ⋯ 菜单的定位锚：贴会话行右上角，菜单右对齐展开。
    选择器带 .sessionItem 前缀抬高特异性：CSS Modules 的加载顺序不可控，
    必须保证这里能覆盖 menu.module.css 的 .wrap{position:relative} */
+/* ⋯ 菜单：**在流里的固定一格**（2026-11-17 改）
+   ============================================================
+   一开始想把它绝对定位叠在时间上（悬停时时间淡出、⋯ 顶上来），实测**点不动**：
+   叠上去之后 `elementFromPoint` 命中的是时间那层，触发器（未悬停时
+   `pointer-events: none`）被盖住 ⇒ 菜单打不开（`aria-expanded` 一直是 false）。
+   改成在流里占一格（22px）：不叠层、不吃点击，代价是标题少 22px 宽
+   （标题本来就会省略）。时间因此**不需要**再淡出 —— 两者不再抢位置。 */
 .sessionItem .sessionMenu {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  /* V2 二次调整（抄 DSH 会话列表）：平时隐藏，鼠标移上/键盘聚焦到行内才显示。
-     不占布局（absolute），opacity + pointer-events 保证隐藏时点不到 */
+  flex: none;
+  display: flex;
+  align-items: center;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.12s ease;
+}
+
+/* 触发器收成 24×24（menu 组件默认是 34×34 的命中区：那是给"独立按钮"用的，
+   在这里会把整行顶到 41px）。⚠️ 只挑**直接子元素里的触发器**（带 aria-expanded），
+   不要用 `> *` —— 菜单面板在 side 对齐时也是 wrap 的子节点，会被一起缩小。 */
+.sessionItem .sessionMenu > button[aria-expanded] {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  font-size: 14px;
 }
 
 .sessionItem:hover .sessionMenu,
@@ -207,8 +234,9 @@
 }
 
 .sessionRenameInput {
-  width: 100%;
-  padding: 6px 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 10px;
   font-family: var(--font-mono);
   font-size: 13px;
   color: var(--ink);
@@ -222,9 +250,10 @@
    复用行内重命名的"状态替换行内容"模式，样式按 34px 命中区（V2 口径）。
    危险操作（删除）用 error 红，取消按钮浅底静默——与审批卡同语言 */
 .sessionConfirm {
+  flex: 1 1 auto; /* 行变成 flex 容器后，确认条要自己撑满（2026-11-17） */
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   padding: 4px 0;
 }
 
@@ -267,29 +296,4 @@
 
 .confirmDelete:hover {
   filter: brightness(1.08);
-}
-
-.footText {
-  display: block;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.footPath {
-  display: block;
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--ink-faint);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.sidebarFoot {
-  padding: 10px 16px;
-  border-top: 1px solid var(--line-soft);
-  font-family: var(--font-mono);
-  font-size: 12px; /* §10.5 口径：等宽标签最小 12px */
-  color: var(--ink-faint);
 }

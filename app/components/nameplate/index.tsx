@@ -1,61 +1,27 @@
 "use client";
 
 // ============================================================
-// 铭牌 —— 页头：标志 / 标题 / run 信息 / 状态灯
+// 品牌行 —— 左栏最上面那一行（2026-11-17 从"整页页头"降级）
 // ============================================================
-// 停止按钮不在页头：它是高频操作，放在输入框旁（发送按钮在 run
-// 进行中变成「停止」），见 page.tsx console 区——操作位置跟随
-// 用户视线，这是 Phase 4 遗留体验问题的修正。
+// 以前它是**横跨全宽**的页头：左边标志 + 标题，右边模型 / runId / 状态灯 / 轮次。
+// 2026-11-17 用户定：右侧那些信息没意义（"待命"看不懂、"T2"是内部轮次、
+// runId 每轮都变），于是整块删掉；页头也缩成**只属于左栏的品牌行**，
+// 右栏从顶部开始（见 page.module.css 的 leftColumn / stage）。
 //
-// V2（2026-08-26）：清空会话功能已删除（用户拍板）——它是 Phase 1
-// 单会话时代的遗产，多会话下被「新建/删除」覆盖，且当时连确认弹框
-// 都没有（静默抹历史，比删除还危险）。顶栏 ⋯ 菜单随之整个移除，
-// 页头只剩信息（run/模型/状态灯），没有任何操作按钮。
-// 服务端 DELETE /api/chat 保留，未来斜杠命令（/clear 等）可复用。
+// 状态不再写文字：会话行首那个点会说话（进行中转圈 / 完成蓝 / 待确认黄 / 失败红），
+// 见 app/components/session-list/session-row.tsx。
+//
+// 停止按钮也不在这里：它放在输入框旁（run 进行中发送按钮变成「停止」）。
 // ============================================================
 
 import styles from "./nameplate.module.css";
-import { shortId } from "../../lib/format";
 
-// 状态灯的四档（相位）：由页面根据最近事件推导，这里只负责文案
-export const PHASES = {
-  idle: "待命",
-  thinking: "思考中",
-  tool: "执行工具",
-  streaming: "输出中",
-} as const;
-
-export type Phase = keyof typeof PHASES;
-
-type NameplateProps = {
-  runId: string;
-  model: string;
-  phase: Phase;
-  turn: number;
-};
-
-export function Nameplate({ runId, model, phase, turn }: NameplateProps) {
+export function Nameplate() {
   return (
-    <header className={styles.nameplate}>
+    <div className={styles.brand}>
       <PenMark />
       <span className={styles.wordmark}>statve</span>
-
-      <div className={styles.plateRight}>
-        {runId && (
-          <span className={styles.readoutRun} title={`run ${runId} · ${model}`}>
-            <span className={styles.model}>{model}</span>
-            <span className={styles.plateRule} />
-            <span className={styles.run}>run {shortId(runId)}</span>
-          </span>
-        )}
-        {/* 相位是动态值，beacon-${phase} 保持全局字符串（见 module.css 注释） */}
-        <span className={`${styles.beacon} beacon-${phase}`}>
-          <span className={styles.beaconLens} />
-          <span className={styles.beaconLabel}>{PHASES[phase]}</span>
-          {turn > 0 && <span className={styles.beaconTurn}>T{turn}</span>}
-        </span>
-      </div>
-    </header>
+    </div>
   );
 }
 
@@ -64,8 +30,8 @@ function PenMark() {
   return (
     <svg
       className={styles.mark}
-      width="24"
-      height="24"
+      width="18"
+      height="18"
       viewBox="0 0 24 24"
       aria-hidden="true"
     >

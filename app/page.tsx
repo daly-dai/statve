@@ -6,7 +6,7 @@
 // 它本身不含业务逻辑，只做三件事：
 //   1. 调 useAgentRun() 拿状态和行为（消息、事件、loading、发送、清空）
 //   2. 派生展示数据（phase / turn / rows 三个纯函数）
-//   3. 组合组件（Nameplate / Overture / MessageRow / TraceRail…）
+//   3. 组合组件（Nameplate / MessageRow / SessionBar / TraceViewer…）
 //
 // 样式：组件样式跟组件走（components/<组件>/<组件>.module.css）；
 // 页面自己的布局（对话面容器 + 指令台 + 错误横幅）在 ./page.module.css；
@@ -34,7 +34,8 @@
 //                   状态灯/清空按钮
 //   <SessionList>   app/components/session-list/ —— 左侧会话栏
 //                   （列表 / 新建 / 行内重命名 / 删除）
-//   <Overture>      app/components/overture/ —— 空态引导 + 例句按钮
+//   <SessionBar>    app/components/session-bar/ —— 右栏第一行：会话标题 + 模型名
+//                   （新会话不显示标题；空会话整行收起）
 //   <MessageRow>    app/components/message-row/ —— 转录稿单条消息
 //                   （用户/Agent 文本/工具调用行/工具结果卡片）
 //   <TraceViewer>   app/components/trace-viewer/ —— 轨迹 tab：竖轴记录表
@@ -45,8 +46,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import styles from "./page.module.css";
-import { Nameplate, type Phase } from "./components/nameplate";
-import { Overture } from "./components/overture";
+import { Nameplate } from "./components/nameplate";
 import { MessageRow } from "./components/message-row";
 import { TraceViewer } from "./components/trace-viewer";
 import { SessionList } from "./components/session-list";
@@ -59,6 +59,7 @@ import { SkillChip } from "./components/skill-chip";
 import { ContextMeter } from "./components/context-meter";
 import { useAgentRun } from "./lib/use-agent-run";
 import { useRunStore } from "./lib/run-store";
+import { useMarkSessionRead } from "./lib/use-mark-session-read";
 import { useCommandMenu } from "./lib/use-command-menu";
 import { useSessions } from "./lib/use-sessions";
 import { useWorkspaces } from "./lib/use-workspaces";
@@ -67,7 +68,7 @@ import { DirectoryBrowser } from "./components/directory-browser";
 import { useStickyScroll } from "./lib/use-sticky-scroll";
 import { useTraces } from "./lib/use-traces";
 import { formatTokens } from "./lib/format";
-import type { ObservedEvent } from "./lib/sse";
+import { SessionBar } from "./components/session-bar";
 import type { ApprovalMode } from "./services/chat/types";
 import { getApprovalMode, setApprovalMode } from "./services/chat";
 
@@ -77,7 +78,6 @@ export default function Home() {
   // refresh 额外用于"run 结束后列表保鲜"（见下方 loading 跳变 effect）
   const {
     sessions,
-    sessionsRoot,
     currentId,
     select,
     create,
@@ -125,7 +125,6 @@ export default function Home() {
   //   （2026-08-26：reset 已删——清空会话功能移除，见 nameplate 头注释）
   const {
     messages,
-    observed,
     loading,
     error,
     runId,
@@ -156,7 +155,6 @@ export default function Home() {
   // pick/submit 的命令分支全在 hook 里，页面只接线（use-command-menu.ts）。
   const {
     input,
-    setInput,
     inputRef,
     commandMenuOpen,
     commandActiveIndex,
@@ -254,12 +252,6 @@ export default function Home() {
     });
   }, [refresh]);
 
-  // 点空态例句：把文案填进输入框并聚焦（不直接发送，用户可再改）
-  function pickSeed(text: string) {
-    setInput(text);
-    inputRef.current?.focus();
-  }
-
   // A3：顶部 tab（对话 / 轨迹）。轨迹只在 tab 打开时才拉数据——没打开就
   // 不请求（useTraces 的 enabled）；`live` 让它在本轮 run 进行中轮询，
   // run 一结束 effect 重跑，自动补一次完整加载。
@@ -269,72 +261,89 @@ export default function Home() {
     live: loading,
   });
 
-  // 派生展示数据（都是纯函数，不改状态；B17③：useMemo 只在依赖变时重算——
-  // 否则每次渲染都全量重跑 derivePhase/currentTurn）：
-  //   phase  状态灯相位（待命/思考中/执行工具/输出中）—— 看最近一条事件推断
-  //   turn   当前进行到第几轮 —— 从 turn_start 事件数出来
-  const phase = useMemo(
-    () => derivePhase(observed, loading),
-    [observed, loading],
-  );
-  const turn = useMemo(() => currentTurn(observed), [observed]);
+  // 状态点（C56 第二轮）：**当前会话的结局，只要发生在这个页面里就算"看过"** ——
+  // 切回来不亮，再切走也不复活。为什么必须是 effect 见 hook 自己的注释。
+  useMarkSessionRead(currentId);
+
+  // 右栏标题行（2026-11-17）：会话标题 + 模型名，规则都在 <SessionBar> 里
+  // （新会话不显示标题）。运行状态**不**写在这里 —— 行首那个点表达的是
+  // "我还没看见的结局"，而当前会话按规则不点（`app/lib/session-dot`）。
+  // 新会话（一条消息都没有）连 tab 都不显示。
+  const showTabs = hasConversation(sessions, currentId, messages.length);
 
   return (
     <div className="app">
-      {/* 页头：runId / 模型名 / 状态灯（清空按钮已删，见 nameplate 头注释）。
-          停止按钮不在这：它在输入框旁（run 进行中发送按钮变身），见 console 区 */}
-      <Nameplate runId={runId} model={model} phase={phase} turn={turn} />
-
       <div className="deck">
-        {/* 左侧工作空间栏（C49/C51）：分组 / 组头新建会话 / 组头菜单三件事 */}
-        <SessionList
-          groups={groups}
-          totalSessions={sessions.length}
-          sessionsRoot={sessionsRoot}
-          workspaces={workspaces}
-          currentId={currentId}
-          onSelect={(id) => {
-            // 离开一条空会话（自动建的那条）之前先把它丢掉，侧栏不留噪音
-            if (id !== currentId) discardUntouched();
-            select(id);
-          }}
-          onCreateSession={(workspaceId) => {
-            // 换一条会话 = 也要离开当前这条；空的话一起丢掉
-            discardUntouched();
-            create(workspaceId);
-          }}
-          onRename={(id, title) => {
-            rename(id, title);
-          }}
-          onDelete={(id) => {
-            // B22：删会话 = 服务端删除 + 本地清桶（abort 在跑流，帧不再写）
-            useRunStore.getState().deleteRun(id);
-            remove(id);
-          }}
-          onCreateWorkspace={() => {
-            setWorkspaceError(null);
-            setBrowserOpen(true);
-          }}
-          onRenameWorkspace={(workspace, title) => {
-            renameWorkspace(workspace.id, title);
-          }}
-          onOpenWorkspaceFolder={(workspace) => {
-            openWorkspace(workspace.id);
-          }}
-          onDeleteWorkspace={(workspace) => {
-            // 删工作空间 = 记录 + 它名下的会话一起删（用户 2026-11-11 定的"粗暴"语义），
-            // 所以删完必须重拉会话列表，否则侧栏还挂着已经不存在的行
-            removeWorkspace(workspace.id).then((deleted) => {
-              if (deleted === null) return;
-              refresh();
-            });
-          }}
-        />
+        {/* 左栏：品牌行 + 工作空间栏（2026-11-17：页头只属于左栏，右栏从顶部开始） */}
+        <div className={styles.leftColumn}>
+          <Nameplate />
+          {/* 左侧工作空间栏（C49/C51）：分组 / 组头新建会话 / 组头菜单三件事 */}
+          <SessionList
+            groups={groups}
+            workspaces={workspaces}
+            currentId={currentId}
+            onSelect={(id) => {
+              // 离开一条空会话（自动建的那条）之前先把它丢掉，侧栏不留噪音
+              if (id !== currentId) discardUntouched();
+              select(id);
+            }}
+            onCreateSession={(workspaceId) => {
+              // 换一条会话 = 也要离开当前这条；空的话一起丢掉
+              discardUntouched();
+              // 新会话没有对话可看：tab 会隐藏，那就必须回到"对话"视图，
+              // 否则会停在上一个会话的"轨迹"里、而 tab 又不见了。
+              setTab("chat");
+              create(workspaceId);
+            }}
+            onRename={(id, title) => {
+              rename(id, title);
+            }}
+            onDelete={(id) => {
+              // B22：删会话 = 服务端删除 + 本地清桶（abort 在跑流，帧不再写）
+              useRunStore.getState().deleteRun(id);
+              remove(id);
+            }}
+            onCreateWorkspace={() => {
+              setWorkspaceError(null);
+              setBrowserOpen(true);
+            }}
+            onRenameWorkspace={(workspace, title) => {
+              renameWorkspace(workspace.id, title);
+            }}
+            onOpenWorkspaceFolder={(workspace) => {
+              openWorkspace(workspace.id);
+            }}
+            onDeleteWorkspace={(workspace) => {
+              // 删工作空间 = 记录 + 它名下的会话一起删（用户 2026-11-11 定的"粗暴"语义），
+              // 所以删完必须重拉会话列表，否则侧栏还挂着已经不存在的行
+              removeWorkspace(workspace.id).then((deleted) => {
+                if (deleted === null) return;
+                refresh();
+              });
+            }}
+          />
+        </div>
 
-        <main className={styles.stage}>
+        <main
+          className={styles.stage}
+          data-tabs={showTabs ? undefined : "none"}
+        >
+          {/* 1. 会话标题行（右栏第一行）：标题 + 模型名。
+              新会话（标题空 / 还是「新会话」）不显示标题，只留右边 —— 规则在组件里。 */}
+          <SessionBar
+            label={labelOfSession(sessions, currentId)}
+            model={model}
+          />
           {/* A3 顶部 tab：对话 / 轨迹。指令台在 .stage 的最后一行，两个 tab
-              共用它——切到轨迹也照样能发消息（B17④ 的常驻输入框）。 */}
-          <div className={styles.tabs} role="tablist">
+              共用它——切到轨迹也照样能发消息（B17④ 的常驻输入框）。
+              ⚠️ 2026-11-17：**新会话不显示 tab**（没有对话也没有轨迹可看，
+              显示切换器只是噪音）。用 data-hidden 归零而不是不渲染，
+              原因是 .stage 按行排栅格，少一个子元素会让内容整体错一行。 */}
+          <div
+            className={styles.tabs}
+            role="tablist"
+            data-hidden={showTabs ? undefined : ""}
+          >
             <button
               type="button"
               role="tab"
@@ -361,32 +370,30 @@ export default function Home() {
           {tab === "chat" ? (
             <div className={styles.transcript} ref={transcriptRef}>
               <div className={styles.reel}>
-                {/* 空态 → 起手式引导；有消息 → 逐条渲染。
-                  attached：工具结果行从属于上一条消息（视觉上缩进连接）
-                  live：最后一条且正在加载 → 流式增长动画 + 思考中占位 */}
-                {messages.length === 0 ? (
-                  <Overture onPick={pickSeed} />
-                ) : (
-                  messages.map((msg, i) => {
-                    // B17③：toolOutputs 只下发给"含 toolCall 的 assistant 行"。
-                    // 为什么不能全量传：toolOutputs 是每帧新对象，MessageRow 又
-                    // 是 memo 组件——若每行都收新引用，memo 浅比较全部失效，
-                    // 流式就退回全树重渲。只有渲染 toolCall 的行才消费它
-                    // （bash 实时输出挂在 ToolCallLine 下），其余行传 undefined。
-                    const needsLiveOutput =
-                      msg.role === "assistant" &&
-                      msg.content.some((block) => block.type === "toolCall");
-                    return (
-                      <MessageRow
-                        key={`${msg.role}-${msg.timestamp}-${i}`}
-                        message={msg}
-                        attached={i > 0 && msg.role === "toolResult"}
-                        live={loading && i === messages.length - 1}
-                        toolOutputs={needsLiveOutput ? toolOutputs : undefined}
-                      />
-                    );
-                  })
-                )}
+                {/* 逐条渲染。attached：工具结果行从属于上一条消息（视觉上缩进连接）
+                    live：最后一条且正在加载 → 流式增长动画
+                    ⚠️ 2026-11-17：空态那套起手式引导（<Overture>）整块删了 ——
+                    "多轮对话 · 会话记忆已开启 / 给它一个目标…" 和四个例句按钮
+                    都是早期教学阶段的脚手架，用户明确不再需要。 */}
+                {messages.map((msg, i) => {
+                  // B17③：toolOutputs 只下发给"含 toolCall 的 assistant 行"。
+                  // 为什么不能全量传：toolOutputs 是每帧新对象，MessageRow 又
+                  // 是 memo 组件——若每行都收新引用，memo 浅比较全部失效，
+                  // 流式就退回全树重渲。只有渲染 toolCall 的行才消费它
+                  // （bash 实时输出挂在 ToolCallLine 下），其余行传 undefined。
+                  const needsLiveOutput =
+                    msg.role === "assistant" &&
+                    msg.content.some((block) => block.type === "toolCall");
+                  return (
+                    <MessageRow
+                      key={`${msg.role}-${msg.timestamp}-${i}`}
+                      message={msg}
+                      attached={i > 0 && msg.role === "toolResult"}
+                      live={loading && i === messages.length - 1}
+                      toolOutputs={needsLiveOutput ? toolOutputs : undefined}
+                    />
+                  );
+                })}
                 {/* 上下文压缩进行中（B2）：后端在调模型生成摘要，给用户明确反馈，
                   而不是让 transcript 停在原地像卡住 */}
                 {compacting && (
@@ -605,31 +612,38 @@ function composerHint(hasSession: boolean): string {
     : "还没有会话：点左侧工作空间组头的 ＋，或新增一个工作空间（会自动开会话）";
 }
 
+/**
+ * 会话的显示标签（**和侧栏那一行的标签同一条链**：标题 ?? 首条消息 ?? 空）。
+ * 提到模块层是为了不把 `find + 可选链` 的分支记到 Home 的圈复杂度上。
+ */
+function labelOfSession(
+  sessions: { id: string; title?: string; preview?: string }[],
+  id: string,
+): string {
+  const found = sessions.find((item) => item.id === id);
+  if (!found) return "";
+  return found.title ?? found.preview ?? "";
+}
+
+/**
+ * 这个会话有没有"对话"可看 —— 决定右栏顶部的「对话 / 轨迹」tab 要不要出现。
+ *
+ * 判据两条任一成立即可：
+ *   ① 本次打开后已经加载/产生了消息；
+ *   ② 列表里这条会话已有首条消息的预览（服务端事实，进页面就有，不会闪）。
+ * 都没有 ⇒ 这是新会话，tab 没有意义（没有对话也没有轨迹）。
+ */
+function hasConversation(
+  sessions: { id: string; preview?: string }[],
+  id: string,
+  messageCount: number,
+): boolean {
+  if (messageCount > 0) return true;
+  const found = sessions.find((item) => item.id === id);
+  return Boolean(found?.preview);
+}
+
 // ============ 状态推导（纯函数，跟着页面走） ============
-
-// 状态灯相位：加载中才显示；看最近一条事件——
-//   工具执行 → "执行工具"；流式增量 → "输出中"；否则 → "思考中"
-function derivePhase(observed: ObservedEvent[], loading: boolean): Phase {
-  if (!loading) return "idle";
-  const last = observed[observed.length - 1]?.event;
-  if (
-    last?.type === "tool_execution_start" ||
-    last?.type === "tool_execution_end"
-  ) {
-    return "tool";
-  }
-  if (last?.type === "message_update") return "streaming";
-  return "thinking";
-}
-
-// 当前轮次：事件流里最后一个 turn_start 的 turn 值
-function currentTurn(observed: ObservedEvent[]): number {
-  let turn = 0;
-  for (const { event } of observed) {
-    if (event.type === "turn_start") turn = event.turn;
-  }
-  return turn;
-}
 
 function scrollToEnd(box: HTMLDivElement | null) {
   box?.scrollTo(0, box.scrollHeight);

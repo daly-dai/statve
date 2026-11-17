@@ -19,10 +19,10 @@
 // ============================================================
 
 import { useEffect, useRef, type ReactNode } from "react";
-import type { RunPhase } from "../../lib/run-fold";
 import type { SessionSummary } from "../../lib/use-sessions";
 import { formatClock } from "../../lib/format";
-import { useSessionRunPhase } from "../../lib/run-store";
+import { useSessionReading, useSessionRunPhase } from "../../lib/run-store";
+import { sessionDotFor, type DotKind } from "../../lib/session-dot";
 import { Menu } from "../ui/menu";
 import styles from "./session-list.module.css";
 
@@ -50,14 +50,18 @@ type SessionRowProps = {
 };
 
 /**
- * B22 状态点的悬停说明。三种形态各有说法（与行内状态点注释一一对应）：
- * running → 正在执行；done → 上次运行已完成；等待类（approval / ask）→ 等待你的确认。
+ * 状态点的悬停说明（C56 第二轮）。文案跟着新模型走：结局点只在你"没看见"时
+ * 才存在，所以说法是"你还没看"，不是第一版的"上次运行已完成"。
+ * 用 Record 而不是 switch：漏一个 DotKind 直接是类型错误（穷尽性交给 tsc），
+ * 每个键都必然有值，`consistent-return` 也没得抱怨。
  */
-function phaseTitle(phase: RunPhase): string {
-  if (phase === "running") return "正在执行";
-  if (phase === "done") return "上次运行已完成";
-  return "等待你的确认";
-}
+const DOT_TITLES: Record<DotKind, string> = {
+  none: "",
+  running: "正在执行",
+  waiting: "等你确认",
+  done: "跑完了，你还没看",
+  error: "失败了，你还没看",
+};
 
 export function SessionRow({
   session,
@@ -82,10 +86,17 @@ export function SessionRow({
     if (confirmingDelete) cancelRef.current?.focus();
   }, [confirmingDelete]);
 
-  // 本会话的 run 阶段（B22 多会话状态点）：self-subscribe，不进 page props。
-  // 极轻订阅：selector 返回一个小字符串，只有 phase 变化才触发重渲——
-  // 别的会话每帧更新时本行 selector 求值结果不变 → 不重渲。
+  // 本会话的 run 阶段 + 阅读位置（C56 第二轮）：**点不是 phase 的投影** ——
+  // "在跑 / 卡住等你"看此刻的事实，"结局"看"跑到第几次 vs 你看到第几次"。
+  // 两个订阅都很轻：selector 只返回一个小字符串 / 一个引用，别的会话每帧更新
+  // 时它们求值结果不变 → 本行不重渲。
   const phase = useSessionRunPhase(session.id);
+  const reading = useSessionReading(session.id);
+  const dot = sessionDotFor({
+    phase,
+    isCurrent: current,
+    record: reading,
+  });
 
   // 行内容三态互斥，优先级：删除确认 > 重命名编辑 > 正常展示。
   // （原先是嵌套三目，"哪一态"要数冒号才看得出来，改成显式分支。）
@@ -145,37 +156,37 @@ export function SessionRow({
   } else {
     rowBody = (
       <>
-        {/* V2 二次调整（2026-08-26，抄 DSH 会话列表）：
-            不再显示 session 文件 id。没标题时回退到首条消息
-            （preview），再没有才显示「未命名会话」——原始 id
-            （s_2026-08-26T..._xxx）是存储细节，不是给人看的名字 */}
+        {/* 状态点（2026-11-17 第二轮）：**点 = 这条会话有一件我没看见的事**。
+            绝对定位：只在行首占 6px、不参与 flex 排布 —— 否则"有点 / 没点"
+            两种行的标题会错开。四种形态（CSS 只认 data-dot，颜色/动画在样式里）：
+              running → 转圈（正在跑）
+              waiting → 黄点（卡住等你确认）
+              done    → 蓝点（你离开期间跑完了，还没看）
+              error   → 红点（同上，但失败了；点开能看到红横幅里的原因）
+            判据**不在这里**，在 `app/lib/session-dot`（16 条场景的由来也在那里）：
+              · 当前会话永不点 —— 连"在跑"也不点（右栏有别的表达）
+              · 前两种看"此刻的事实"，后两种看"跑到第几次 vs 你看到第几次" */}
+        {dot !== "none" && (
+          <span
+            className={styles.sessionDot}
+            data-dot={dot}
+            title={DOT_TITLES[dot]}
+            role="status"
+          />
+        )}
+        {/* 单行：标题占满剩余宽度 + 时间靠右（回到原型 `prototype-workspace.html`
+            的 `.row` 形态）。没标题时回退到首条消息（preview），再没有才显示
+            「新会话」——原始 id（s_2026-08-26T..._xxx）是存储细节，不是给人看的名字。
+            ⚠️ 2026-11-17（C56 密度）：**不再单独渲染"预览"那一行** ——
+            一行 60–80px 太占地方；标题本来就是"标题 ?? 预览"，
+            没改过名的会话照样看得到那句话。 */}
         <div className={styles.sessionTitle}>
-          {session.title ?? session.preview ?? "未命名会话"}
+          {session.title ?? session.preview ?? "新会话"}
         </div>
-        {session.title &&
-          session.preview &&
-          session.preview !== session.title && (
-            <div className={styles.sessionPreview}>{session.preview}</div>
-          )}
-        <div className={styles.sessionMeta}>
-          {/* B22 状态点：只显示非当前会话（当前会话主体界面已有状态展示）。
-              派生规则（用户拍板 2026-09-02）：
-                running            → loading 呼吸点
-                waiting-approval / waiting-ask → 黄点（等你操作）
-                done               → 绿点（上次跑完了，保持到下次 startRun）
-                idle / error       → 不显示（error 由会话内横幅展示） */}
-          {!current && phase !== "idle" && phase !== "error" && (
-            <span
-              className={styles.sessionDot}
-              data-phase={phase}
-              title={phaseTitle(phase)}
-              role="status"
-            />
-          )}
-          {/* 2026-09-01：条数已删（占空间 + /clear 后要刷新才更新，
-              用户拍板"不要展示多少条了"）——只留时间 */}
-          <span>{formatClock(session.updatedAt)}</span>
-        </div>
+        {/* 条数已删（2026-09-01 用户拍板）；时间常驻右侧，悬停时淡出给 ⋯ 让位 */}
+        <span className={styles.sessionTime}>
+          {formatClock(session.updatedAt)}
+        </span>
       </>
     );
   }

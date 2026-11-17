@@ -7,44 +7,50 @@
    ============================================================ */
 
 .group {
-  margin: 2px 0 6px;
+  margin: 2px 0 4px;
   min-width: 0;
 }
 
+/* 2026-11-17：组与组之间**不再画线**，只靠留白分组（用户定） */
 .group + .group {
-  border-top: 1px solid var(--line-soft);
   padding-top: 4px;
 }
 
+/* 组头（2026-11-17 改）：**整行可点**、28px、没有会话数徽标。
+   箭头只是视觉提示，不再是唯一热区。 */
 .head {
   display: flex;
   align-items: center;
   gap: 6px;
-  min-height: 30px;
-  padding: 2px 6px;
+  height: 28px;
+  padding: 0 4px 0 8px;
   border-radius: var(--r);
+  cursor: pointer;
 }
 
 .head:hover {
   background: var(--feed-hover);
 }
 
-.chevron {
-  flex: none;
-  width: 18px;
-  height: 18px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--ink-faint);
-  cursor: pointer;
+/* 键盘焦点要看得见（整行是 button 了） */
+.head:focus-visible {
+  outline: 2px solid var(--line-strong);
+  outline-offset: -2px;
 }
 
-.chevron:hover {
-  color: var(--ink);
+/* 箭头：从 button 降级成 span（热区已经交给整行），只负责转 */
+.chevron {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  display: grid;
+  place-items: center;
+  color: var(--ink-faint);
+  transition: transform 0.12s ease;
+}
+
+.head[aria-expanded="false"] .chevron {
+  transform: rotate(-90deg);
 }
 
 .name {
@@ -58,15 +64,10 @@
   text-overflow: ellipsis;
 }
 
-.count {
-  flex: none;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--ink-faint);
-}
+/* 组头的会话数徽标已删（2026-11-17：用户认为没意义） */
 
-/* 组头动作：平时不可见也不可点（避免每行挂两把按钮），
-   hover 或键盘聚焦到组内才现身 */
+/* 组头动作（＋ / ⋯）：平时不可见也不可点，hover 或键盘聚焦到组内才现身。
+   2026-11-17：命中区 22×22、加号字形 15px（原来 22px 的框配 13px 的「＋」字，显小） */
 .actions {
   margin-left: auto;
   display: flex;
@@ -93,7 +94,6 @@
   border-radius: 4px;
   background: transparent;
   color: var(--ink-mid);
-  font-size: 13px;
   line-height: 1;
   cursor: pointer;
 }

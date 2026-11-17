@@ -73,6 +73,9 @@ export function useCommandMenu({
 
   // 快照跟着会话走：换会话 = 换工作空间 = 换技能清单，必须重取
   useEffect(() => {
+    // 还没选中会话（页面刚起 / 刚删干净）时没有"这个会话的命令清单"可拉 ——
+    // 以前这里照样发一次 `?sessionId=`，服务端 400，控制台留两条红字
+    if (!sessionId) return undefined;
     // 会话可能在请求途中又被切走：用 cancelled 丢弃过期响应（否则慢响应会把
     // 上一个会话的技能名单盖到新会话上）
     let cancelled = false;

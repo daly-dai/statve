@@ -42,11 +42,20 @@ import {
   type RunPhase,
   type RunState,
 } from "./run-fold";
+import {
+  EMPTY_READING,
+  advanceRead,
+  recordRunEnd,
+  type ReadingRecord,
+} from "./session-dot";
 import { readStream, type StreamFrame } from "./sse";
 
 // 在跑流的 abort 句柄（sessionId → controller）：不进 store state——
 // controller 是运行时句柄不是 UI 状态，放 state 会让订阅误触发。
 const activeAborts = new Map<string, AbortController>();
+// 每次 run 一个自增序号（写进 reading 记录当"第几次结局"）。模块级而不是桶里：
+// 序号要跨会话单调递增，两个会话同时在跑也不能撞号。
+let runSeq = 0;
 // 已删会话标记：hydrate 在途时删了会话，返回后不复活桶
 // （sessionId 全局唯一 s_时间戳-随机，不会与新建会话重名）
 const deletedSessions = new Set<string>();
@@ -54,6 +63,17 @@ const deletedSessions = new Set<string>();
 export type RunStore = {
   /** sessionId → 桶。冷会话（从未跑过/刷新后）没有桶，用 EMPTY_RUN 兜底投影 */
   runs: Record<string, RunState>;
+  /**
+   * sessionId → 阅读位置（"结局你看过没有"）。**不进 runs 桶**：桶是帧折叠
+   * 出来的数据（能重放），"人看没看见"不是折叠的产物，是产品状态。
+   * 判据与场景表见 `./session-dot`。
+   */
+  reading: Record<string, ReadingRecord>;
+  /**
+   * 看过这条会话的结局：把已读位置推到最后一次收尾。
+   * 没有可推时**原样返回 state** ⇒ 可以在 effect 里放心重复调（不会自激重渲）。
+   */
+  markRead: (sessionId: string) => void;
   /** 发消息：建桶 → SSE 消费循环 → 逐帧 foldRunFrame（一会话一 run） */
   startRun: (sessionId: string, text: string) => Promise<void>;
   /** 停止当前会话的 run：POST /stop（服务端中止模型请求 + 杀命令进程树） */
@@ -89,11 +109,25 @@ function replaceRun(
 
 export const useRunStore = create<RunStore>()((set, get) => ({
   runs: {},
+  reading: {},
+
+  markRead: (sessionId) => {
+    set((state) => {
+      const record = state.reading[sessionId];
+      if (!record) return state;
+      const next = advanceRead(record);
+      if (next === record) return state; // 没得推：引用不变 ⇒ 不重渲
+      return { reading: { ...state.reading, [sessionId]: next } };
+    });
+  },
 
   startRun: async (sessionId, text) => {
     // 一会话一 run：loading 中禁发送（与其他会话并行不冲突）
     if (!sessionId || !text.trim()) return;
     if (get().runs[sessionId]?.loading) return;
+
+    // 这次 run 的序号（结局记录里的"第几次"）。取在守卫之后：被拦下的调用不占号
+    const seq = ++runSeq;
 
     // 建桶起点：freshRun 保留会话内容（messages 跨 run 延续）、清 run 瞬态
     set((state) =>
@@ -149,12 +183,22 @@ export const useRunStore = create<RunStore>()((set, get) => ({
       });
     } finally {
       activeAborts.delete(sessionId);
-      // 流结束（done/error/abort/网络断）：loading 收尾。
-      // done/error 帧已把 lastOutcome 写好，这里只负责熄灯
+      // 流结束（done/error/abort/网络断）：熄灯 **+ 记下这次结局**。
+      // failed 的判据是"没收到 done 帧"—— 结局只有成败两种、没有"不知道"：
+      // 断流时 lastOutcome 仍是 none，若不记失败，这个点就永远不亮（零信号）。
       set((state) => {
         const prev = state.runs[sessionId];
-        if (!prev) return state;
-        return replaceRun(state, sessionId, { ...prev, loading: false });
+        if (!prev) return state; // 桶已删（删会话 → abort）：不记
+        return {
+          runs: { ...state.runs, [sessionId]: { ...prev, loading: false } },
+          reading: {
+            ...state.reading,
+            [sessionId]: recordRunEnd(
+              state.reading[sessionId] ?? EMPTY_READING,
+              { seq, failed: prev.lastOutcome !== "done" },
+            ),
+          },
+        };
       });
     }
   },
@@ -202,10 +246,14 @@ export const useRunStore = create<RunStore>()((set, get) => ({
     activeAborts.get(sessionId)?.abort();
     activeAborts.delete(sessionId);
     deletedSessions.add(sessionId);
+    // 桶和阅读记录一起删：会话没了，"你看没看过它的结局"也就没有意义了
     set((state) => {
-      if (!(sessionId in state.runs)) return state;
-      const { [sessionId]: _gone, ...rest } = state.runs;
-      return { runs: rest };
+      if (!(sessionId in state.runs) && !(sessionId in state.reading)) {
+        return state;
+      }
+      const { [sessionId]: _bucket, ...runs } = state.runs;
+      const { [sessionId]: _reading, ...reading } = state.reading;
+      return { runs, reading };
     });
   },
 
@@ -331,4 +379,14 @@ export function useSessionRun(sessionId: string): RunState {
  */
 export function useSessionRunPhase(sessionId: string): RunPhase {
   return useRunStore((s) => deriveRunPhase(s.runs[sessionId] ?? EMPTY_RUN));
+}
+
+/**
+ * 一条会话的阅读位置（状态点用）。极轻订阅：记录只在**真的变了**的时候换引用
+ * （`recordRunEnd` / `advanceRead`），所以别的会话收尾不会让这一行重渲。
+ */
+export function useSessionReading(
+  sessionId: string,
+): ReadingRecord | undefined {
+  return useRunStore((s) => s.reading[sessionId]);
 }

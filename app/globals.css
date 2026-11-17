@@ -153,7 +153,8 @@ pre,
 .app {
   height: 100dvh;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  /* 2026-11-17：页头不再是横跨全宽的一行（它缩进左栏了），所以只有 deck 一行 */
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
 }
 

@@ -8,35 +8,66 @@
    指令台（console 系列）+ 错误横幅（alarm 系列）。
    ============================================================ */
 
+/* ---- 左栏：品牌行 + 工作空间栏（2026-11-17） ----
+   页头缩进这里之后，右栏才能"从顶部开始"。竖线画在整列上（品牌行也要有），
+   所以侧栏自己的 border-right 去掉了（见 session-list.module.css）。 */
+.leftColumn {
+  display: grid;
+  grid-template-rows: 44px minmax(0, 1fr);
+  min-height: 0;
+  min-width: 0;
+  background: var(--recorder);
+  border-right: 1px solid var(--line);
+}
+
+/* ---- 右栏第一行「会话标题 + 模型名」已拆成组件：见 app/components/session-bar/ ---- */
+
 /* ---- 对话面（转录稿） ---- */
 /* A3：第一行是 tab 条（对话 / 轨迹），第二行才是可换的内容面。
    原来只有两行（内容 + 指令台），加 tab 条后必须显式写 auto，
-   否则 tab 条会落进 1fr 那一行、把内容面挤成 auto。 */
+   否则 tab 条会落进 1fr 那一行、把内容面挤成 auto。
+   2026-11-17：最上面又加了一行「会话标题」，所以这里是三条显式行。 */
 .stage {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   background: var(--paper);
 }
 
-/* ---- 顶部 tab（A3）：1fr 槽位按 tab 换内容，指令台永远在最下面 ---- */
+/* ---- 顶部 tab（A3 + 2026-11-17 收成 32px）：1fr 槽位按 tab 换内容，
+   指令台永远在最下面 ---- */
 .tabs {
   display: flex;
-  gap: 2px;
-  padding: 12px 32px 0;
-  border-bottom: 1px solid var(--line-strong); /* 结构分界：tab 条 ↔ 内容面（1px） */
+  align-items: flex-end;
+  gap: 18px;
+  height: 32px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+/* 新会话（一条消息都没有）：**不显示 tab**（2026-11-17 用户定）。
+   ⚠️ 用 display:none 会把 tab 从栅格里**整个移除**，后面的行全部前移
+   （实测：转录区被挤成 38px、下面空一大截）。所以隐藏时把 stage 的行模板
+   一起换掉 —— 少一行，剩下的按「标题行 / 内容」两行排。 */
+.tabs[data-hidden] {
+  display: none;
+}
+
+.stage[data-tabs="none"] {
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .tab {
-  height: var(--hit);
-  padding: 0 14px;
+  height: 32px;
+  padding: 0;
   border: 0;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px; /* 压在 .tabs 那 1px 线上，选中态把线"接上" */
+  border-bottom: 1.5px solid transparent;
   background: none;
-  font-size: 13px;
-  color: var(--ink-mid);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
   cursor: pointer;
 }
 
@@ -46,7 +77,6 @@
 
 .tabOn {
   color: var(--ink);
-  font-weight: 600;
   border-bottom-color: var(--ink);
 }
 

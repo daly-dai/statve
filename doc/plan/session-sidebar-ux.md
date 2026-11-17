@@ -264,3 +264,224 @@ if (workspace) {
 3. **标题 30 字封顶**：更长的第一句话会截断带省略号；用户可随时手动改名。
 4. **密度（C56 的另一半）没做**：会话行仍是三行字（47–69px），预览行也还在。这一轮只做"会话归属"，UI 密度按原计划留给下一轮。
 5. **输入框的内容不跟会话走**（2026-11-17 用户定为**新功能**，不是 bug）：在 A 打了一半字切到 B，那段字会留在框里、按发送会用 B 的 sessionId 发出去。已入池 **C59**（`doc/plan/chat-surface-dsh-alignment.md` 四.12），"离开会话时清空输入框"**不做** —— C59 落地后输入框是"按会话派生的值"，这三处入口不需要再手动清。
+
+## 八、状态点判定（第二轮，2026-11-17）：从「phase 投影」改成「未读结局」
+
+> **这一节推翻 4.1 那一版状态点的判定方式**（渲染形态不变）。原因、依据、模型、判据、验收都记在这里。
+
+### 8.1 第一版错在哪
+
+第一版的判据是 `!current && phase !== "idle"` —— 一个**纯投影**：点的样子直接由 run 阶段算出来。
+
+用户在真机上给的判据（2026-11-17 原话整理）：
+1. 我在当前会话 ⇒ 当前会话**不展示**状态。
+2. 只有当我切到别的会话、且之前那条**还在跑**时，才该点亮。
+3. 切回一条**已经跑完**的会话 —— 成功或失败 —— 点就该**隐藏**；之后再切走，那个点也应该**彻底消失**。
+4. 只有"运行中"这一种：切回来不展示，切出去**还要**展示进行中。
+
+失败**只发生在结局态**（`done` / `error`）上 —— 因为 `lastOutcome` 是**存量**（`app/lib/run-fold/index.ts:111` 注释原话「上次 run 正常结束（绿点依据；**保持到下次 startRun**）」）：
+
+| 场景 | 第一版 | 要求 |
+|---|---|---|
+| 我看着它跑完 → 切到 B | 亮蓝点 | 不亮（我已经看见了） |
+| 后台跑完 → 切回 A（点灭）→ 再切到 B | **又亮蓝点** | 永不亮 |
+
+⇒ 缺的东西是「**这个结局我看过没有**」。它不可能从 `phase` 里推导出来 —— 必须另存。
+
+### 8.2 依据：两家参考项目是同一个模型（一手源码）
+
+| | DSH（`E:\agents-read\deepseek-harness`） | pi-web（`E:\agents-read\pi-web`） |
+|---|---|---|
+| 数据 | 每会话一条记录 `{completedTurn, failed, readTurn, manualUnread}`（`packages/client/ui-session-status/src/index.ts:20-22`） | 一个 `Set<sessionId>`（`UNREAD_SESSIONS_STORAGE_KEY`，`components/SessionSidebar.tsx:311`） |
+| 点亮 | Host 收到 `turn/end` 就记（`index.ts:47-50`），**不看你在不在看** | 上一刻在跑、此刻不在跑、且不是当前会话（`:1025-1049`） |
+| 熄灭 | 把"读到第几轮"推到"跑到第几轮"（`:76-77`），之后 `completedTurn > readTurn` 永远为假 | 选中该会话即删（`:1076-1084`）；它又开始跑也删（`:1046`） |
+| 判定 | `manualUnread \|\| (id !== viewing && completedTurn > readTurn)`（`src/client/status.ts:188-189`） | 集合里有没有这个 id |
+| 红点 | `unread && failed`（`status.ts:194`）—— **只有未读时才是红** | 不区分成败 |
+| 优先级 | 等确认（黄）> 在跑（转圈）> 未读（蓝/红）（`ui-workspace/.../rows/Rows.tsx:384-438`） | 等输入（黄）> 在跑（转圈）> 未读 > 时间（`components/SessionTree.tsx:583-610`） |
+| 历史 | 不认领：README「Existing history starts read」；`index.ts:44-46` 注释「a `turn/end` replayed from a restored log reaches no listener」 | 不认领：初始集合为空 |
+
+**一句话**：点 = 「**有一条你没看见的事**」。事有两种 —— **正在发生**（在跑 / 卡住等你）与 **你离开之后才有的结局**。前者的判据是"此刻的事实"，后者是"**跑到第几次** vs **你看到第几次**"。
+
+### 8.3 模型（本项目的算术）
+
+每条会话一条记录，**住浏览器内存，不进 `RunState`**：
+
+```ts
+type ReadingRecord = {
+  endedSeq: number;   // 最近一次 run 收尾的序号（0 = 本页面里还没跑完过）
+  failed: boolean;    // 那次 run 是不是失败
+  readSeq: number;    // 你"看到"到第几次的结局（0 = 一次都没看过）
+};
+```
+
+- **不进 `RunState` 的理由**：`RunState` 是**帧折叠出来的**（谁能跑出来、能重放）；"人看没看见"不是折叠的产物，它是产品状态。
+- **序号**：`run-store` 里一个模块级自增计数器，`startRun` 起步时取一个（两个会话同时在跑也不会撞）。
+- **刷新即归零**（只住内存）：`endedSeq` 只可能来自**本页面里真实跑过的 run**，刷新后它必然归零；只把"未读"单独持久化，会造出"这条会话根本没在跑、却挂着上次的点"的**半截状态**。要做持久化是两个数一起存、外加"跨刷新算不算逃过一眼"的决策 —— 另开一项。
+
+### 8.4 判据（一个纯函数）
+
+`app/lib/session-dot/index.ts`：
+
+```ts
+export function sessionDotFor(input: {
+  phase: RunPhase;                     // 实时阶段（run-fold 的 deriveRunPhase）
+  isCurrent: boolean;                  // 右栏显示的是不是它
+  record: ReadingRecord | undefined;   // 没有记录 = 没跑完过
+}): "none" | "running" | "waiting" | "done" | "error"
+```
+
+```
+isCurrent                                    → none   ← 规则 1：当前会话永不点（比两家都严，见 8.8）
+phase ∈ {waiting-approval, waiting-ask}      → waiting
+phase === running                            → running
+endedSeq > readSeq                           → failed ? error : done
+否则                                          → none
+```
+
+- **`done` / `error` 这两个 phase 值不参与点**：它们只说明"上次结局是什么"，不说明"你看没看见"。结局一律走 `endedSeq > readSeq`。（`RunPhase` 不动，仍然给别处用。）
+- **"看过"= 推进 `readSeq`**，不是"清标记"：一个动作同时满足规则 3（再切走也不亮）和规则 4（跑的时候切回来不点、切走又点）。
+
+### 8.5 写 / 推进时机（只有四处）
+
+| # | 在哪 | 干什么 | 为什么在这里 |
+|---|---|---|---|
+| 1 | `run-store.startRun` 起步 | `endingSeq = ++runCounter` | 一次 run 一个序号，同会话重跑也不会与上一轮相同 |
+| 2 | `run-store.startRun` 的 `finally` | **无条件**写 `{endedSeq, failed}` | 这是 run 收尾的**唯一**出口（done / error / 用户停止 / 网络断 全走它，见 `app/lib/run-store.ts:150-159`） |
+| 3 | 同上，`failed` 怎么算 | `failed = lastOutcome !== "done"` | 结局只有成败两种，**没有"不知道"**：流被掐断时 `lastOutcome` 仍是 `none` ⇒ 记失败（第一版这里是 `idle`，等于零信号） |
+| 4 | `use-mark-session-read`（`page.tsx` 调用一次） | 当前会话若 `endedSeq > readSeq` ⇒ `readSeq = endedSeq` | 两条触发都要：**切到它** 与 **它在当前会话里跑完**（后者不是 id 变化，只靠"切会话"会漏） |
+
+两个易踩的点：
+
+- **不会闪**：`isCurrent → none`，所以推进之前那一刻当前会话本来就不显示点。
+- **不会循环**：`markRead` 在没有推进空间时**原样返回 state**（引用不变 ⇒ 不重渲、effect 不再触发）。
+- 我们**不需要** DSH 那道"正文真的收到那一轮才算已读"的校验（`src/client/acknowledge.ts:44-47`）：`endedSeq` 只可能来自本页面真实跑过的 run，那条 run 的 messages 就在同一个桶里 —— 切回去时内容一定在。（唯一会缺内容的是冷会话，而冷会话没有记录。）
+
+### 8.6 文件级改动清单
+
+| 文件 | 改动 |
+|---|---|
+| `app/lib/session-dot/index.ts` | **新增**：`ReadingRecord` / `EMPTY_READING` / `recordRunEnd` / `advanceRead` / `sessionDotFor` |
+| `app/lib/session-dot/index.test.ts` | **新增**：8.7 的 16 行场景表 + 4 条记录算术 |
+| `app/lib/run-store.ts` | state 加 `reading`；`markRead`；`startRun` 里序号 + `finally` 写记录；`deleteRun` 连记录一起删；投影 hook `useSessionReading` |
+| `app/lib/use-mark-session-read.ts` | **新增**（平铺，无单测）：一个 effect，把"当前会话的已读位置"推上去 |
+| `app/page.tsx` | 调 `useMarkSessionRead(currentId)`；顺带改掉「状态不写在这里 —— 会话行首那个点已经表达」这句已不成立的注释 |
+| `app/components/session-list/session-row.tsx` | 取 `record` + `sessionDotFor`，按 `dot` 渲染；`phaseTitle` → `dotTitle`（文案见 8.7） |
+| `app/components/session-list/session-list.module.css` | `data-phase` → `data-dot`（它不再是 `RunPhase` 了），两个 waiting 选择器并成一个；**尺寸/颜色/动画一个像素都不动** |
+
+### 8.7 验收
+
+**单测**（`app/lib/session-dot/index.test.ts`，每条用例名 = 真机上真会发生的场景）：
+
+| # | 场景 | phase | current | ended/read | 期望 |
+|---|---|---|---|---|---|
+| 1 | 我在 A，A 在跑 | running | ✔ | 0/0 | none |
+| 2 | A 跑着，我切到 B | running | ✘ | 0/0 | running |
+| 3 | A 还在跑，切回 A | running | ✔ | 0/0 | none |
+| 4 | 再切走（还在跑） | running | ✘ | 0/0 | running |
+| 5 | A 后台跑完（成功） | done | ✘ | 1/0 | done |
+| 6 | 切回 A | done | ✔ | 1/0 | none |
+| 7 | **再切走** | done | ✘ | 1/1 | **none** |
+| 8 | **我看着它跑完再切走** | done | ✘ | 1/1 | **none** |
+| 9 | A 后台跑失败 | error | ✘ | 1/0 | error |
+| 10 | **切回 A 再切走** | error | ✘ | 1/1 | **none** |
+| 11 | A 后台等我批准 | waiting-approval | ✘ | 0/0 | waiting |
+| 12 | 我看一眼没批就走 | waiting-approval | ✘ | 0/0 | waiting |
+| 13 | 等批准 → 超时失败 | error | ✘ | 1/0 | error |
+| 14 | 我在 A 点停止再切走 | done | ✘ | 1/1 | none |
+| 15 | 后台断流（无 done/error 帧） | idle | ✘ | 1/0 | error |
+| 16 | 序号往前滚过（看到第 1 次、第 2 次跑完） | done | ✘ | 2/1 | done |
+
+记录算术：`recordRunEnd` 只改 `endedSeq`/`failed`、不动 `readSeq`；`advanceRead` 推到 `endedSeq` 且**幂等**（同一个记录调两次返回同一引用）。
+
+**悬停文案**：running「正在执行」· waiting「等你确认」· done「跑完了，你还没看」· error「失败了，你还没看」。
+
+**静态与回归**：`tsc --noEmit` 0 · `pnpm lint` 0 · 全量单测全绿（当前 828 条）。
+
+**真机（浏览器，用你自己起着的 dev server）**：
+
+| 步骤 | 期望 |
+|---|---|
+| 1 | 在 A 发一句 → **立刻**切到 B | A 出现转圈 |
+| 2 | 等 A 的 run 结束 | A 的点变蓝（成功）或红（失败）—— **不是消失** |
+| 3 | 切回 A | 点消失（当前会话永远不点） |
+| 4 | 再切到 B | A **没有点**（彻底消失，规则 3） |
+| 5 | 在 A 发一句、**留在 A** 看它跑完，再切到 B | A 没有点（规则 3 的另一半） |
+| 6 | 重发一条，让它在 A 里失败（断网 / 故意出错），留在 A 看完，再切走 | A 没有红点 |
+
+> 第 6 步顺带验 8.5 的第 3 条：**没收到 done 帧要记成失败**。造这个失败**不能靠断网**（见下面的实测事实），要用可控的请求失败 —— 具体做法见 8.7.1 的补验表。
+
+#### 8.7.1 真机实测（2026-11-17，dev server `localhost:3000`，网络这一轮恢复了）
+
+用一段 2000 字散文（生成够久）在测试会话 A 里跑，**0.6s 后切走**，然后每 500ms 采一次那一行的点：
+
+| 时刻 | `data-dot` | 可见证据 |
+|---|---|---|
+| t=1.1s → 15.2s | `running` | `animation: dot-spin`、宽 **10px** 的环、背景透明 |
+| t=15.7s | `done` | 背景 **`rgb(47, 75, 153)`**（=`--pen-user`）、宽 6px、`title="跑完了，你还没看"` |
+
+| 步骤 | 实测 |
+|---|---|
+| ① 发一句，立刻切走 | 后台那一行**转圈**（上面两行）✅ |
+| ② 等它结束 | 变成**蓝点**，**不是消失** ✅ |
+| ③ 切回 A | 无点（当前会话）✅ |
+| ④ 再切走（2s 后复查） | **无点** —— 规则 3 ✅ |
+| ⑤ 在 A 里看着它跑完（发「3×7」，13s 采样）→ 切走 | 13s 里**全程没点**；切走后仍然没点 ✅（**第一版的 bug 正在这里**：会亮蓝点）|
+| ⑥ 删掉测试会话（⋯ → 删除 → 行内确认） | 侧栏与 `/api/sessions` 都回到用户的 2 条；`deleteRun` 连阅读记录一起删，无异常 ✅ |
+
+**黄点与红点也补验了**（用户追问「浏览器验收了吗」之后补的两条）：
+
+| 场景 | 怎么造出来的 | 实测 |
+|---|---|---|
+| **黄点**（等确认） | 让它调 `bash`（审批模式=建议 ⇒ bash 必弹）。真出现审批卡（`Y允许` / `N拒绝`）后**切走** | `data-dot="waiting"`、`title="等你确认"`、**`rgb(176, 116, 27)`**（=`--pen-signal`）、6px；后台稳定 3.2s+ ✅ |
+| **红点**（失败结局） | 用 Playwright 路由把 `POST /api/chat` **拖 6 秒后 abort**（控制台就一条 `net::ERR_FAILED @ /api/chat`，等价于服务端 5xx / 连接被掐）→ 发一句 → **立刻切走** | t=1.2–5.8s `running`（转圈）→ **t=6.3s `error`**、`title="失败了，你还没看"`、**`rgb(163, 45, 31)`**（=`--pen-error`）、6px ✅；切回 → 灭；再切走 → 不复亮 ✅ |
+
+⇒ 8.5 第 3 条（**"没收到 done 帧就记失败"**）在真机上成立了：那一次 run 根本没拿到 `done` 帧，红点亮起来了。第一版这里会停在 `idle`、什么都不亮。
+
+**顺手记一条实测事实（以后别再想当然）**：用 `context.setOffline(true)` 掐网**不会**让本地 SSE 报错 —— 流只是**停住**，`running` 一直挂着；网络恢复后 done 帧照常到达、点变蓝。所以"断流 → 失败"的触发条件是**请求真的失败 / 连接被重置**（`fetch` reject 或 reader 抛错），不是"网卡没了"。验证这一条必须制造真实的失败，不能靠断网。
+
+**四态样式探针**（按属性名建临时节点读 computed style，验的是改名后选择器还对得上）：
+
+| `data-dot` | 背景 | 宽 | 动画 |
+|---|---|---|---|
+| `running` | 透明（环） | 10px | `dot-spin 0.9s` |
+| `waiting` | `rgb(176, 116, 27)` = `--pen-signal` | 6px | 无 |
+| `done` | `rgb(47, 75, 153)` = `--pen-user` | 6px | 无 |
+| `error` | `rgb(163, 45, 31)` = `--pen-error` | 6px | 无 |
+
+## 八·补：高亮与点距（2026-11-17 用户看真机后提的两条）
+
+**用户原话**：① 状态点和会话标题没有间隔 ② 高亮状态下的会话应该是整行都高亮，现在是加了内边距和边框，应该从左到右整行都高亮、不需要边框。
+
+**病根（量出来的，不是猜的）**：
+
+| 症状 | 原因 |
+|---|---|
+| 点和标题贴着 | 点是 `position: absolute; left: 8px`（宽 6px ⇒ 占 8–14），而行 `padding-left: 14px` ⇒ 标题正好从 14 开始，**间隔 = 0** |
+| 高亮像一块带边的小卡片 | 三层叠加：`.sessionList` 左右各 6px 内边距 + `workspace-group > .body` 左缩进 12px ⇒ 色的左沿在侧栏 18px 处；行自己还有 `border: 1px solid transparent` + `border-radius` ⇒ 看着是"药丸" |
+
+**继承 / 改动**（§11.8 那两栏；原型 `workspace/prototype-workspace.html` 是基准）：
+
+| | 内容 |
+|---|---|
+| **继承** | 单行 34px、左侧"点 + 标题 + 时间靠右"的排布、四态配色与转圈动画、行缩进（会话挂在组名下）、hover 用 `--feed-hover`、当前项用 `--plate` |
+| **改动** | ① 高亮的**画法**：原型 `.row.on` 是"面 + `--line` 细环 + 圆角"，而原型**没有**会缩进 12px 的组容器 ⇒ 照抄到我们这个结构上就变成"内缩的小卡片"。用户要的是**色带贴边**，所以在 `.sessionItem` 上加 `margin-left: -12px` 吃掉组缩进、把 `.sessionList` 的左右 6px 也去掉，并删掉 `border` / `border-radius`。② 点的水平位置从 8px 挪到 **18px**，标题的 `padding-left` 从 14px 改成 **32px** ⇒ 留出 8px 间隔。③ 顺带的后果：hover 也变成满宽（不这样的话，悬停是窄块、当前是满宽，同一条列表里两种宽度会显得错位）。 |
+
+**实测（浏览器，`localhost:3000`）**：
+
+| 判据 | 实测 |
+|---|---|
+| 当前行背景跨度 | 左沿 **0px**、右沿 **0px**（侧栏 263px，行 263px）✅ |
+| 边框 / 圆角 | `border-width: 0px`、`border-radius: 0px` ✅ |
+| 状态点位置（6px 的结局点） | 18 → 24 ✅ |
+| 点与标题的间隔 | 标题左沿 32 ⇒ **8px** ✅（转圈态：环 16–26，间隔 6px） |
+| 有 / 无状态点的标题对齐 | 两者标题左沿都是 **32** ✅（点是绝对定位，不参与排布） |
+| 行高 | 34px（没变）✅ |
+| 横向溢出 | 1440 / 1440 ✅ |
+
+### 8.8 不做的（都拍了，写在前面免得被当遗漏）
+
+1. **失焦 / 切到后台 → 当前会话的未读重新出现**（DSH 有：`status.ts:178` 的 `viewing` 要求 `visible && hasFocus`；pi-web 没有）。**不做**：我们的"当前"就是"右栏显示的是哪条"，加了焦点判断会让"只是切窗口回个消息"变成满屏点。
+2. **持久化 / 跨标签页同步**：见 8.3，只住内存。
+3. **手动「标记为未读」**（两家都有，DSH 还带快捷键 `Shift+Cmd+U` / `Ctrl+Shift+U`）：**没做**，要的话按流程入池再开一项。
+4. **组头计数 / 页签徽标**（pi-web 把未读数画在组头和 favicon 上）：与 C56「删掉一切计数」的拍板冲突，不做。
+5. **当前会话连"在跑"也不点**（规则 1 比两家都严 —— 两家都会为在跑的当前会话点）：**保持严的这一版**，因为当前会话的运行状态在右栏有别的表达（停止按钮 / 输入台禁用）。

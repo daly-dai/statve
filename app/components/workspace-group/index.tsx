@@ -12,7 +12,7 @@
 //   组头 = [⌄] 名字 计数 [＋] [⋯]；动作默认 opacity 0，hover / 键盘聚焦才出现。
 // ============================================================
 
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import { Menu } from "../ui/menu";
 import type { MenuItem } from "../ui/menu";
 import styles from "./index.module.css";
@@ -76,7 +76,25 @@ export function WorkspaceGroup({
 
   return (
     <section className={styles.group}>
-      <div className={styles.head}>
+      {/* 组头整行可点（2026-11-17 用户定：热区太小，只有箭头能点是浪费）：
+          不在改名态时才可点；键盘用 Enter / Space 同样能切换 */}
+      <div
+        className={styles.head}
+        {...(renaming
+          ? {}
+          : {
+              role: "button",
+              tabIndex: 0,
+              "aria-expanded": !collapsed,
+              "aria-label": `${collapsed ? "展开" : "折叠"} ${title}`,
+              onClick: onToggleCollapse,
+              onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                onToggleCollapse();
+              },
+            })}
+      >
         {renaming ? (
           <>
             <input
@@ -107,13 +125,9 @@ export function WorkspaceGroup({
           </>
         ) : (
           <>
-            <button
-              className={styles.chevron}
-              type="button"
-              aria-expanded={!collapsed}
-              aria-label={collapsed ? `展开 ${title}` : `折叠 ${title}`}
-              onClick={onToggleCollapse}
-            >
+            {/* 箭头只是视觉提示（不再是热区）：**整行**都能展开/收起，
+                只有右边的 ＋ / ⋯ 除外（它们 stopPropagation） */}
+            <span className={styles.chevron} aria-hidden="true">
               <svg
                 width="10"
                 height="10"
@@ -129,14 +143,17 @@ export function WorkspaceGroup({
                   strokeLinejoin="round"
                 />
               </svg>
-            </button>
+            </span>
 
             <span className={styles.name} title={title}>
               {title}
             </span>
-            <span className={styles.count}>{count}</span>
 
-            <span className={styles.actions}>
+            <span
+              className={styles.actions}
+              // 动作区不参与"整行点击"：点 ＋ / ⋯ 不能顺手把组收起
+              onClick={(event) => event.stopPropagation()}
+            >
               <button
                 className={styles.iconButton}
                 type="button"
@@ -144,7 +161,7 @@ export function WorkspaceGroup({
                 aria-label={`在 ${title} 里新建会话`}
                 onClick={onCreateSession}
               >
-                ＋
+                <PlusIcon />
               </button>
               <Menu
                 label={`${title} 的工作空间操作`}
@@ -196,5 +213,23 @@ export function WorkspaceGroup({
         </div>
       )}
     </section>
+  );
+}
+
+/** 组头的「新建会话」：一个加号（2026-11-17 从「＋」文字换成图标，好调大小） */
+function PlusIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <path d="M12 5v14M5 12h14" />
+    </svg>
   );
 }

@@ -26,10 +26,6 @@ import styles from "./session-list.module.css";
 
 type SessionListProps = {
   groups: SessionGroup<SessionSummary>[];
-  /** 全部会话数（页脚显示；分组后头部那个总数没意义了） */
-  totalSessions: number;
-  /** 数据根路径（页脚交代"会话存在哪"） */
-  sessionsRoot: string;
   workspaces: Workspace[];
   currentId: string;
   onSelect: (id: string) => void;
@@ -44,8 +40,6 @@ type SessionListProps = {
 
 export function SessionList({
   groups,
-  totalSessions,
-  sessionsRoot,
   workspaces,
   currentId,
   onSelect,
@@ -125,7 +119,7 @@ export function SessionList({
           aria-label="新增工作空间"
           onClick={onCreateWorkspace}
         >
-          ＋
+          <FolderPlusIcon />
         </button>
       </div>
 
@@ -177,50 +171,52 @@ export function SessionList({
                 }}
                 onCancelDelete={() => setDeletingWorkspaceId(null)}
               >
-                {group.sessions.length === 0 ? (
-                  <button
-                    className={styles.emptyGroup}
-                    type="button"
-                    onClick={() => onCreateSession(workspace.id)}
-                  >
-                    <span aria-hidden="true">＋</span> 在这里开第一个会话
-                  </button>
-                ) : (
-                  folded.visible.map((session) => (
-                    <SessionRow
-                      key={session.id}
-                      session={session}
-                      current={session.id === currentId}
-                      editing={session.id === editingId}
-                      confirmingDelete={pendingDelete?.id === session.id}
-                      draft={draft}
-                      onSelect={() => onSelect(session.id)}
-                      onStartRename={() => startRename(session)}
-                      onRenameDraft={setDraft}
-                      onCommitRename={commitRename}
-                      onCancelRename={cancelRename}
-                      onRequestDelete={() => setPendingDelete(session)}
-                      onConfirmDelete={() => {
-                        onDelete(session.id);
-                        setPendingDelete(null);
-                      }}
-                      onCancelDelete={() => setPendingDelete(null)}
-                    />
-                  ))
-                )}
+                {folded.visible.map((session) => (
+                  <SessionRow
+                    key={session.id}
+                    session={session}
+                    current={session.id === currentId}
+                    editing={session.id === editingId}
+                    confirmingDelete={pendingDelete?.id === session.id}
+                    draft={draft}
+                    onSelect={() => onSelect(session.id)}
+                    onStartRename={() => startRename(session)}
+                    onRenameDraft={setDraft}
+                    onCommitRename={commitRename}
+                    onCancelRename={cancelRename}
+                    onRequestDelete={() => setPendingDelete(session)}
+                    onConfirmDelete={() => {
+                      onDelete(session.id);
+                      setPendingDelete(null);
+                    }}
+                    onCancelDelete={() => setPendingDelete(null)}
+                  />
+                ))}
               </WorkspaceGroup>
             );
           })
         )}
       </div>
-
-      <div className={styles.sidebarFoot}>
-        <span className={styles.footText}>共 {totalSessions} 个会话</span>
-        {/* 会话到底存在哪，必须能看见（数据根可被 STATVE_HOME 覆盖） */}
-        <span className={styles.footPath} title={sessionsRoot}>
-          数据根 {sessionsRoot}
-        </span>
-      </div>
     </aside>
+  );
+}
+
+/** 「新增工作空间」的图标：文件夹 + 加号（2026-11-17 从「＋」文字换掉，好调大小） */
+function FolderPlusIcon() {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+      <path d="M12 11v5M9.5 13.5h5" />
+    </svg>
   );
 }
