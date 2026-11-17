@@ -10,7 +10,12 @@
 //   GET    → { sessions: [...], sessionsRoot }（全量、跨工作空间；侧栏要给分组与"存在哪"）
 //   POST   → 新建空会话（body: { workspaceId, title? }）→ { id }
 //   PATCH  → 重命名（body: { id, title }）→ { ok }
-//   DELETE → 删除会话（?id=）→ { ok }
+//   DELETE → 删除会话（?id=）→ { ok, deleted: true }
+//           只删空会话（?id=…&ifEmpty=1）→ { ok, deleted: boolean }
+//
+// ⚠️ 2026-11-17 加了 `ifEmpty`：页面上"新增工作空间会自动开一条会话"，
+// 用户**切换走**时如果那条会话还是空的，就顺手删掉。判据**一律以磁盘为准**，
+// 客户端说什么都不作数 —— 删除不可逆，宁可少删。
 //
 // ⚠️ 2026-11-11：**新建会话必须指定工作空间**（`workspaceId` 必填、没有默认值）。
 // 为什么：会话的落盘位置由「工作空间路径」推出（`<根>/<工作空间键>/<会话目录>`），
@@ -112,14 +117,21 @@ export async function PATCH(req: NextRequest) {
 // --- DELETE /api/sessions：删除整个会话（含它的全部轨迹） ---
 export async function DELETE(req: NextRequest) {
   const id = req.nextUrl.searchParams.get("id") || "";
+  const ifEmpty = req.nextUrl.searchParams.get("ifEmpty") === "1";
 
   if (!isValidSessionId(id)) {
     return NextResponse.json({ error: "非法会话 id" }, { status: 400 });
   }
 
   try {
+    if (ifEmpty) {
+      // 只有空才删；有内容返回 deleted:false（**不是错误** —— 这是正常结果）
+      const deleted = await sessionManager.deleteIfEmpty(id);
+      return NextResponse.json({ ok: true, deleted });
+    }
+
     await sessionManager.delete(id);
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, deleted: true });
   } catch (error) {
     return NextResponse.json(
       { error: (error as Error).message },

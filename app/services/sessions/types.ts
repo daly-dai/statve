@@ -36,3 +36,9 @@ export type RenameSessionParams = { id: string; title: string };
 
 /** PATCH / DELETE 成功返回（失败抛 ApiError） */
 export type OkResult = { ok: true };
+
+/** DELETE ?id=…&ifEmpty=1 → deleted:false = 里面已经有内容，没删（不是错误） */
+export type DiscardResult = { ok: true; deleted: boolean };
+
+/** DELETE ?empty=1 → 清掉了几条空会话 */
+export type CleanupResult = { ok: true; deleted: number };

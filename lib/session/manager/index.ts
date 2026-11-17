@@ -38,6 +38,16 @@ import {
   sessionLogPathIn,
 } from "../paths";
 
+/**
+ * 新会话的默认标题（2026-11-17 用户定）。
+ * 用户发出第一条消息后由 `adoptFirstMessageAsTitle` 换成那句话；
+ * 所以这个字符串同时是"默认名"，也是"还可以被自动改名"的判据。
+ */
+export const DEFAULT_SESSION_TITLE = "新会话";
+
+/** 自动标题最多几个字（侧栏一行本来就会省略，这里只挡"整段话塞进文件头"） */
+const TITLE_MAX_CHARS = 30;
+
 export type SessionSummary = {
   id: string;
   title?: string;
@@ -73,7 +83,7 @@ export class SessionManager {
     return summaries.sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
-  /** 新建空会话：先写临时目录再整体改名；title 可选；返回生成的 id */
+  /** 新建空会话：先写临时目录再整体改名；title 不传就用默认名；返回生成的 id */
   async create(input: { cwd: string; title?: string }): Promise<string> {
     const id = generateSessionId();
     const targetDir = sessionDir(this.root, input.cwd, id);
@@ -90,7 +100,8 @@ export class SessionManager {
       filePath: sessionLogPathIn(tempDir),
       cwd: input.cwd,
       sessionId: id,
-      title: input.title,
+      // 2026-11-17 用户定：新会话就叫「新会话」，等第一条消息发出去再改成那句话
+      title: input.title?.trim() || DEFAULT_SESSION_TITLE,
     });
 
     await renameFile(tempDir, targetDir);
@@ -111,22 +122,59 @@ export class SessionManager {
     if (header.type !== "session") {
       throw new Error(`会话文件头损坏：${id}`);
     }
-    // title 为空串 = 清除显示名，回退用 id
+    // title 为空串 = 清除显示名，回退用 preview/id
     lines[0] = JSON.stringify(
       title.trim()
         ? { ...header, title: title.trim() }
         : { ...header, title: undefined },
     );
 
-    // 原子替换（C18 A 档 ②）：先写同目录临时文件，再 rename 覆盖。
-    // 为什么必须原子：本函数是「全量读 → 改首行 → **全量写回**」，实测最大会话
-    // 124KB。直接 writeFile 到目标路径时，若进程在写回中途被杀——**dev server
-    // 随改代码反复重启，这个窗口天天出现**——文件会被截断成半截 JSON，会话永久
-    // 损坏。同一目录内的 rename 在同一文件系统上是原子的：任何时刻崩溃，要么
-    // 看到完整旧内容、要么看到完整新内容，最坏只留一个 .tmp 残骸。
-    const tmpPath = `${location.logPath}.tmp`;
-    await writeFile(tmpPath, lines.join("\n"), "utf8");
-    await renameFile(tmpPath, location.logPath);
+    await writeLinesAtomically(location.logPath, lines);
+  }
+
+  /**
+   * 把「用户说的第一句话」变成标题（2026-11-17 用户定）。
+   *
+   * 新会话默认叫「新会话」；用户发出第一条消息之后，标题换成那句话——
+   * 侧栏就不用再看到一片「新会话」。
+   *
+   * 三个条件全满足才改，缺一不可（改错了就是把用户起过的名字盖掉）：
+   *   ① 会话里**还没有任何消息**（这是第一条）；
+   *   ② 头里的 title 为空，或仍是默认的「新会话」（用户手动改过名 ⇒ 不动）；
+   *   ③ 替进来的文本非空。
+   *
+   * 返回 `true` = 改了。**不抛业务错误**（找不到会话 / 文件坏了就返回 false）：
+   * 它挂在发消息的路径上，标题改不动不该让这次对话失败。
+   */
+  async adoptFirstMessageAsTitle(id: string, text: string): Promise<boolean> {
+    const title = oneLine(text, TITLE_MAX_CHARS);
+    if (!title) return false;
+
+    try {
+      const location = await this.locate(id);
+      if (!location) return false;
+
+      const lines = (await readFile(location.logPath, "utf8")).split("\n");
+      if (!lines[0]?.trim()) return false;
+
+      const entries = lines
+        .filter((line) => line.trim())
+        .map((line) => JSON.parse(line) as SessionEntry);
+      // ① 已经有消息了 ⇒ 这不是"第一句话"
+      if (entries.some((entry) => entry.type === "message")) return false;
+
+      const header = entries[0];
+      if (header.type !== "session") return false;
+      // ② 用户起过名字 ⇒ 不动
+      const current = header.title?.trim();
+      if (current && current !== DEFAULT_SESSION_TITLE) return false;
+
+      lines[0] = JSON.stringify({ ...header, title });
+      await writeLinesAtomically(location.logPath, lines);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** 删除整个会话目录（含全部轨迹）。会话层不再需要知道轨迹布局：目录就是边界 */
@@ -157,6 +205,27 @@ export class SessionManager {
     }
 
     return deleted;
+  }
+
+  /**
+   * 只在「一条对话消息都没有」时删除。
+   * 返回 `true` = 真删了；`false` = 里面已经有内容，**一个字节不动**。
+   *
+   * 什么时候用（2026-11-17 用户定）：「新增工作空间会自动开一条会话」，
+   * 用户**切换走**的那一刻，如果这条会话还是空的，就把它删掉 ——
+   * 侧栏不留一条"没人说过话"的会话。
+   *
+   * 为什么服务端要再判一次（客户端明明知道当前会话是不是空的）：客户端的视图可能
+   * 是**过期的**（会话还没加载完 / 另一个标签页刚在里面说过话），而删除不可逆 ——
+   * 所以判据以**磁盘**为准，这就是"fail-closed"（拿不准就不删）。
+   */
+  async deleteIfEmpty(id: string): Promise<boolean> {
+    const location = await this.locate(id);
+    if (!location) throw new Error(`会话不存在：${id}`);
+    // 有内容 ⇒ 一个字节不动（这是本方法存在的全部意义）
+    if (await hasMessages(location.logPath)) return false;
+    await this.delete(id);
+    return true;
   }
 
   /**
@@ -309,4 +378,45 @@ async function summarizeSessionFile(
 
 function truncate(input: string, max: number): string {
   return input.length <= max ? input : `${input.slice(0, max)}…`;
+}
+
+/** 压成单行并截断（标题只能占一行：换行会把侧栏那一行撑破） */
+function oneLine(input: string, max: number): string {
+  const flat = input.replace(/\s+/g, " ").trim();
+  return truncate(flat, max);
+}
+
+/**
+ * 原子替换整个会话文件：先写同目录 `.tmp`，再 rename 覆盖。
+ *
+ * 为什么必须原子：写回是「全量读 → 改首行 → **全量写回**」，实测最大会话 124KB。
+ * 直接 writeFile 到目标路径时，若进程在写回中途被杀——**dev server 随改代码反复
+ * 重启，这个窗口天天出现**——文件会被截断成半截 JSON，会话永久损坏。同目录内的
+ * rename 在同一文件系统上是原子的：任何时刻崩溃，要么看到完整旧内容、要么看到
+ * 完整新内容，最坏只留一个 `.tmp` 残骸。
+ */
+async function writeLinesAtomically(
+  logPath: string,
+  lines: string[],
+): Promise<void> {
+  const tmpPath = `${logPath}.tmp`;
+  await writeFile(tmpPath, lines.join("\n"), "utf8");
+  await renameFile(tmpPath, logPath);
+}
+
+/**
+ * 会话文件里有没有**对话消息**（`compaction` / `todo` 不算：没有消息时它们也不存在）。
+ *
+ * ⚠️ 读坏 / 解析失败时返回 `true`（= 当作"有内容"）：清理是可选动作，宁可不删。
+ */
+async function hasMessages(logPath: string): Promise<boolean> {
+  try {
+    const raw = await readFile(logPath, "utf8");
+    for (const line of raw.split("\n").filter(Boolean)) {
+      if ((JSON.parse(line) as SessionEntry).type === "message") return true;
+    }
+    return false;
+  } catch {
+    return true;
+  }
 }

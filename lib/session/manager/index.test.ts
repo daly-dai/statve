@@ -251,3 +251,170 @@ describe("rename 原子写 —— 先写临时文件再替换", () => {
     }
   });
 });
+
+// ============================================================
+// 空会话（「切换走就删」）：2026-11-17
+// ============================================================
+// 真实场景（用户原话）：新增工作空间会同时开一条会话并选中它；用户**切换会话**
+// 时，如果那条会话一条数据都没有，就在切换的这一刻删掉它。
+// （"已有的工作空间点 ＋ 新建会话"同理。）
+//
+// 判据是**磁盘上一条 message 都没有**（todo / 压缩条目不算对话）。
+// 两条硬要求：
+//   ① 有内容的会话**一个字节都不许动** —— 删除不可逆，宁可少删
+//   ② 读坏了 / 找不到也绝不删（fail-closed）
+describe("空会话清理 —— deleteIfEmpty（切换会话时用）", () => {
+  it("空会话真删（目录一起走）", async () => {
+    const { manager, cwd, cleanup } = makeManager();
+    try {
+      const id = await manager.create({ cwd });
+      const location = await manager.locate(id);
+
+      expect(await manager.deleteIfEmpty(id)).toBe(true);
+      expect(existsSync(location!.dir)).toBe(false);
+      expect(await manager.list()).toEqual([]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("⭐ 有内容的会话返回 false，文件一个字节不动", async () => {
+    const { manager, cwd, cleanup } = makeManager();
+    try {
+      const id = await manager.create({ cwd });
+      const location = await manager.locate(id);
+      await new JsonlSessionStore({
+        filePath: location!.logPath,
+        cwd,
+        sessionId: id,
+      }).appendMessage(createUserMessage("不能删我"));
+      const rawBefore = readFileSync(location!.logPath, "utf8");
+
+      expect(await manager.deleteIfEmpty(id)).toBe(false);
+      expect(readFileSync(location!.logPath, "utf8")).toBe(rawBefore);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("会话不存在 → 抛错（调用方据此知道 id 是错的）", async () => {
+    const { manager, cleanup } = makeManager();
+    try {
+      await expect(manager.deleteIfEmpty("s_不存在")).rejects.toThrow(/不存在/);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("⭐ 文件读坏（不是 JSON）→ 不删：连定位都失败，list 也会跳过它", async () => {
+    const { manager, cwd, cleanup } = makeManager();
+    try {
+      const id = await manager.create({ cwd });
+      const location = await manager.locate(id);
+      writeFileSync(location!.logPath, "{这不是 JSON", "utf8");
+
+      // 头读不出来 ⇒ locate 找不到（cwd 在头里）⇒ 删除入口直接报"不存在"，
+      // 而不是"删一个不知道属于谁的目录"。这就是 fail-closed 的实际形状。
+      await expect(manager.deleteIfEmpty(id)).rejects.toThrow(/不存在/);
+      expect(existsSync(location!.logPath)).toBe(true);
+      expect(await manager.list()).toEqual([]);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+// ============================================================
+// 新会话的标题：默认「新会话」，首条消息发出去后改成那句话（2026-11-17）
+// ============================================================
+// 用户原话：所有新会话默认标题就是「新会话」，用户输入内容发送之后再修改默认标题。
+describe("默认标题与首条消息自动改名", () => {
+  it("create 不传 title → 默认「新会话」", async () => {
+    const { manager, cwd, cleanup } = makeManager();
+    try {
+      const id = await manager.create({ cwd });
+      const [summary] = await manager.list();
+      expect(summary.id).toBe(id);
+      expect(summary.title).toBe("新会话");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("首条消息 → 标题变成那句话（压成单行、超长截断）", async () => {
+    const { manager, cwd, cleanup } = makeManager();
+    try {
+      const id = await manager.create({ cwd });
+      const changed = await manager.adoptFirstMessageAsTitle(
+        id,
+        "  把侧栏改成\n单行  显示  ",
+      );
+
+      expect(changed).toBe(true);
+      const [summary] = await manager.list();
+      expect(summary.title).toBe("把侧栏改成 单行 显示");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("超长（>30 字）→ 截断并加省略号", async () => {
+    const { manager, cwd, cleanup } = makeManager();
+    try {
+      const id = await manager.create({ cwd });
+      await manager.adoptFirstMessageAsTitle(id, "一".repeat(50));
+      const [summary] = await manager.list();
+      expect(summary.title).toBe(`${"一".repeat(30)}…`);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("⭐ 已经有消息了 → 不改（避免把第二条消息当成标题）", async () => {
+    const { manager, cwd, cleanup } = makeManager();
+    try {
+      const id = await manager.create({ cwd });
+      const location = await manager.locate(id);
+      await new JsonlSessionStore({
+        filePath: location!.logPath,
+        cwd,
+        sessionId: id,
+      }).appendMessage(createUserMessage("第一条"));
+
+      expect(await manager.adoptFirstMessageAsTitle(id, "第二条")).toBe(false);
+      const [summary] = await manager.list();
+      expect(summary.title).toBe("新会话");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("⭐ 用户手动改过名 → 不动它（人起的名字 > 自动标题）", async () => {
+    const { manager, cwd, cleanup } = makeManager();
+    try {
+      const id = await manager.create({ cwd });
+      await manager.rename(id, "我自己起的名字");
+
+      expect(await manager.adoptFirstMessageAsTitle(id, "别覆盖我")).toBe(
+        false,
+      );
+      const [summary] = await manager.list();
+      expect(summary.title).toBe("我自己起的名字");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("空文本 / 只有空白 → 不改（不把标题清成空）", async () => {
+    const { manager, cwd, cleanup } = makeManager();
+    try {
+      const id = await manager.create({ cwd });
+      expect(await manager.adoptFirstMessageAsTitle(id, "   \n  ")).toBe(false);
+      expect(await manager.adoptFirstMessageAsTitle("s_不存在", "x")).toBe(
+        false,
+      );
+    } finally {
+      cleanup();
+    }
+  });
+});
