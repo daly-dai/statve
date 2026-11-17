@@ -4,11 +4,15 @@
 
 import { basename } from "node:path";
 import type { RegisteredTool } from "../types";
+import type { EscapePermits } from "../../permission/tool-escape";
 import { resolveInsideWorkspace, stringArg } from "../path-utils";
 import { escapeRegExp, listFiles } from "../shared";
 import { text } from "../../message";
 
-export function createFindTool(workspaceRoot: string): RegisteredTool {
+export function createFindTool(
+  workspaceRoot: string,
+  permits?: EscapePermits,
+): RegisteredTool {
   return {
     name: "find",
     description:
@@ -32,6 +36,7 @@ export function createFindTool(workspaceRoot: string): RegisteredTool {
       const rootDir = resolveInsideWorkspace(
         workspaceRoot,
         stringArg(args.path, "."),
+        permits,
       );
       // 把用户友好的 * 通配转成正则；只匹配文件名（basename），不匹配目录
       // （listFiles 返回的目录带 "/" 后缀，先过滤掉——测试倒逼出的修正）

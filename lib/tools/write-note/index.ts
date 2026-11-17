@@ -9,10 +9,14 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, relative } from "node:path";
 import type { RegisteredTool } from "../types";
+import type { EscapePermits } from "../../permission/tool-escape";
 import { resolveInsideWorkspace, stringArg } from "../path-utils";
 import { text } from "../../message";
 
-export function createWriteNoteTool(workspaceRoot: string): RegisteredTool {
+export function createWriteNoteTool(
+  workspaceRoot: string,
+  permits?: EscapePermits,
+): RegisteredTool {
   return {
     name: "write_note",
     description: "在 workspace/notes/ 下写入一条 markdown 笔记。",
@@ -38,6 +42,7 @@ export function createWriteNoteTool(workspaceRoot: string): RegisteredTool {
       const notePath = resolveInsideWorkspace(
         workspaceRoot,
         `notes/${fileName}`,
+        permits,
       );
       await mkdir(dirname(notePath), { recursive: true });
       await writeFile(notePath, `${stringArg(args.content, "")}\n`, "utf8");

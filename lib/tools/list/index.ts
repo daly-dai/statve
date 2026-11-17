@@ -3,11 +3,15 @@
 // ============================================================
 
 import type { RegisteredTool } from "../types";
+import type { EscapePermits } from "../../permission/tool-escape";
 import { resolveInsideWorkspace, stringArg } from "../path-utils";
 import { listFiles } from "../shared";
 import { text } from "../../message";
 
-export function createListTool(workspaceRoot: string): RegisteredTool {
+export function createListTool(
+  workspaceRoot: string,
+  permits?: EscapePermits,
+): RegisteredTool {
   return {
     name: "list_files",
     description: "列出安全工作区内的文件。",
@@ -24,6 +28,7 @@ export function createListTool(workspaceRoot: string): RegisteredTool {
       const dir = resolveInsideWorkspace(
         workspaceRoot,
         stringArg(args.path, "."),
+        permits,
       );
       const entries = await listFiles(dir, workspaceRoot);
       return {

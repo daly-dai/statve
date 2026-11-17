@@ -172,19 +172,27 @@ function closeSpan(params: {
   span.size = at - (span.startedAt ?? at);
 }
 
-/** 只记「有干预」的审批：放行是默认路径，记下来只会淹掉真正的信号 */
+/** 审批动作 → 视图标签（放行/拦截/改写各有一个名字，避免嵌套三元） */
+const PERMISSION_LABELS = {
+  allow: "审批放行",
+  block: "审批拦截",
+  rewrite: "参数改写",
+} as const;
+
+/** 只记「有干预」的审批：放行是默认路径，记下来只会淹掉真正的信号
+ *  ⭐ 例外（C55 补记 14）：**越界被批准**的放行带 `reason`，那是"人批了一条
+ *  出工作区的调用"，恰恰是事后最该看见的信号 —— 所以按 reason 区分，不按动作。 */
 function foldPermission(
   rows: TraceRow[],
   event: Extract<AgentEvent, { type: "tool_permission" }>,
 ): void {
-  if (event.action === "allow") return;
+  if (event.action === "allow" && !event.reason) return;
 
-  const label = event.action === "block" ? "审批拦截" : "参数改写";
   const note = [event.toolName, event.reason].filter(Boolean).join(" · ");
   rows.push({
     pen: event.action === "block" ? "error" : "signal",
     kind: "signal",
-    label,
+    label: PERMISSION_LABELS[event.action],
     note,
   });
 }

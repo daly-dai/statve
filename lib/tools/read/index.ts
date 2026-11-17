@@ -5,11 +5,15 @@
 import { readFile } from "node:fs/promises";
 import { relative } from "node:path";
 import type { RegisteredTool } from "../types";
+import type { EscapePermits } from "../../permission/tool-escape";
 import { resolveInsideWorkspace, stringArg } from "../path-utils";
 import { truncate } from "../shared";
 import { text } from "../../message";
 
-export function createReadTool(workspaceRoot: string): RegisteredTool {
+export function createReadTool(
+  workspaceRoot: string,
+  permits?: EscapePermits,
+): RegisteredTool {
   return {
     name: "read_file",
     description: "读取安全工作区内的 UTF-8 文本文件。",
@@ -27,6 +31,7 @@ export function createReadTool(workspaceRoot: string): RegisteredTool {
       const filePath = resolveInsideWorkspace(
         workspaceRoot,
         stringArg(args.path, ""),
+        permits,
       );
       const content = await readFile(filePath, "utf8");
       return {

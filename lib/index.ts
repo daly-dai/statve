@@ -60,6 +60,19 @@ export type { ToolContext } from "./tools";
 // 压缩总结（B2：真摘要生成）
 export { generateSummary } from "./summarize";
 
+// 越界判定与一次性通行证（C55）：围栏与审批共用这一份判据
+export {
+  classifyEscape,
+  createEscapePermits,
+  inspectPath,
+  isInside,
+} from "./permission/tool-escape";
+export type {
+  EscapeClass,
+  EscapePermits,
+  EscapeVerdict,
+} from "./permission/tool-escape";
+
 // 运行控制 / 轨迹 / 审批 / 提问（内核侧状态与能力）
 export { runControllers } from "./runControl";
 // 轨迹（A3）：TraceRecorder 写；readTrace / readTraceMeta 读单个文件；

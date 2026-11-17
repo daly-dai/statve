@@ -1,18 +1,30 @@
 // ============================================================
-// 越界判定（4.6）—— 纯函数用例
+// 越界判定（4.6 / C55 补记 14）—— 纯判定 + 一次性凭据
 // ============================================================
 // 这一层错了的后果不是"报错"，而是**该弹的框不弹**（或反过来，每步都弹）。
-// 所以用例盯三件事：
+// 所以用例盯四件事：
 //   ① 7 个带路径的工具都判到（漏一个 = 那个工具可以静默越界）
 //   ② 不参与的两个（write_note / bash）真的不参与
 //   ③ 前缀陷阱：`E:\ws2` 不能被当成 `E:\ws` 里面
+//   ④ ⭐ **软链 / junction**：字面在根内、真实落点在根外 ⇒ `linked`（不问，直接拒）
+//
+// ④ 的夹具用真文件系统（mkdtemp + junction）：这一条**没法用假路径测** ——
+// 它测的正是"字符串看不出来的东西"。用假路径去测 realpath，等于测了个假设。
 
-import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   classifyEscape,
   createEscapePermits,
-  hasEscapeTraces,
+  inspectPath,
   isInside,
 } from "./index";
 
@@ -76,7 +88,7 @@ describe("classifyEscape —— 不参与的两个", () => {
     });
   });
 
-  it("bash 的命令不参与（命令里的路径没法静态解析）", () => {
+  it("bash 的命令不参与（命令里的路径没法静态解析 → bash 一律走弹框）", () => {
     expect(
       classifyEscape(call("bash", { command: "cat ../../etc/passwd" }), root),
     ).toEqual({
@@ -101,25 +113,70 @@ describe("isInside —— 前缀陷阱", () => {
     expect(isInside(root, `${root}2`)).toBe(false);
     expect(isInside(root, resolve(root, ".."))).toBe(false);
   });
-});
 
-describe("hasEscapeTraces —— bash 粗筛（只提示，不拦截）", () => {
-  it.each([
-    "Get-Content C:\\Users\\me\\.env",
-    "cat ../secret.txt",
-    "cd ..",
-    "cat ~/.ssh/id_rsa",
-    "dir \\\\server\\share",
-  ])("带越界痕迹：%s", (command) => {
-    expect(hasEscapeTraces(command)).toBe(true);
-  });
-
-  it.each(["npm test", "git status", "echo hello", "ls -la src"])(
-    "普通命令不算越界痕迹：%s",
-    (command) => {
-      expect(hasEscapeTraces(command)).toBe(false);
+  it.skipIf(process.platform !== "win32")(
+    "Windows 大小写不敏感：同一个目录换个大小写仍然算里面",
+    () => {
+      // 夹具为什么是真的：Windows 路径本来就不区分大小写，而 `relative()`
+      // 只对**存在的**路径才有机会折叠大小写 —— 所以这里拿真实存在的 cwd 试，
+      // 而不是编一个 `/work/proj` 之类的假串（假串上这条判据恒假，测不出东西）。
+      const upper = process.cwd().toUpperCase();
+      expect(isInside(process.cwd(), upper)).toBe(true);
     },
   );
+});
+
+// ============================================================
+// 软链 / junction：字符串看不出来的越界（C55 补记 14）
+// ============================================================
+describe("inspectPath —— 软链/junction 指向根外 → linked", () => {
+  let base = "";
+  let workspace = "";
+  let outside = "";
+
+  beforeAll(() => {
+    base = mkdtempSync(join(tmpdir(), "statve-escape-"));
+    workspace = join(base, "ws");
+    outside = join(base, "outside");
+    mkdirSync(workspace);
+    mkdirSync(outside);
+    // junction（Windows 的目录联接：不需要管理员权限，也不需要符号链接特权）
+    symlinkSync(outside, join(workspace, "link"), "junction");
+    // 反向对照：一条指向**根内**的链，不许被误判成越界
+    mkdirSync(join(workspace, "real"));
+    symlinkSync(join(workspace, "real"), join(workspace, "alias"), "junction");
+  });
+
+  afterAll(() => {
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it("字面在根内、真实落点在根外 → linked（不是 outside：处置不同）", () => {
+    const verdict = inspectPath(workspace, "link/x.txt");
+    expect(verdict.kind).toBe("linked");
+    // 目标给的是**真实位置**（弹框/调试看得懂），不是 "link/x.txt"
+    expect(verdict.target).toBe(join(outside, "x.txt"));
+  });
+
+  it("isInside 按真实位置判：穿过链的目标一律为假", () => {
+    expect(isInside(workspace, join(workspace, "link", "x.txt"))).toBe(false);
+  });
+
+  it("指向根内的链不算越界（canonicalize 不许把正常的链也毙掉）", () => {
+    expect(inspectPath(workspace, "alias/x.txt").kind).toBe("inside");
+  });
+
+  it("链本身也在根内（只是指向外面）—— 判的是落点，不是链文件的位置", () => {
+    expect(inspectPath(workspace, "link").kind).toBe("linked");
+  });
+
+  it("verify 夹具真的是 junction：链的真实落点就是根外那个目录", () => {
+    // 没有这条，junction 创建失败（留个空目录）时上面几条也会"看起来通过" ——
+    // 那测的是夹具没建好，不是判定逻辑。
+    expect(realpathSync.native(join(workspace, "link"))).toBe(
+      realpathSync.native(outside),
+    );
+  });
 });
 
 describe("createEscapePermits —— 一次性通行证", () => {

@@ -5,11 +5,15 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, relative } from "node:path";
 import type { RegisteredTool } from "../types";
+import type { EscapePermits } from "../../permission/tool-escape";
 import { resolveInsideWorkspace, stringArg } from "../path-utils";
 import { isDirectory } from "../shared";
 import { text } from "../../message";
 
-export function createWriteTool(workspaceRoot: string): RegisteredTool {
+export function createWriteTool(
+  workspaceRoot: string,
+  permits?: EscapePermits,
+): RegisteredTool {
   return {
     name: "write_file",
     description: "在工作区内写一个文件（不存在则创建，父目录自动创建）。",
@@ -32,6 +36,7 @@ export function createWriteTool(workspaceRoot: string): RegisteredTool {
       const filePath = resolveInsideWorkspace(
         workspaceRoot,
         stringArg(args.path, ""),
+        permits,
       );
       // 目标是已存在目录 → 报错：写文件却指向目录，说明路径理解错了
       if (await isDirectory(filePath)) {

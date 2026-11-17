@@ -21,6 +21,7 @@ import {
 import type { SessionLocation } from "@/lib/session";
 import { config } from "@/lib/config";
 import { resolveSkillRoots } from "@/lib/resources";
+import { createEscapePermits } from "@/lib";
 import { TraceRecorder } from "@/lib/trace";
 import type { ToolContext } from "@/lib/tools";
 import type { ContextPressure } from "@/app/lib/context-occupancy";
@@ -55,10 +56,12 @@ export function computeContextPressure(
 export function createToolContext(params: {
   workspaceRoot: string;
   skillsRoots: string[];
+  permits?: ToolContext["permits"];
 }): ToolContext {
   return {
     workspaceRoot: params.workspaceRoot,
     skillsRoots: params.skillsRoots,
+    ...(params.permits ? { permits: params.permits } : {}),
   };
 }
 
@@ -75,6 +78,8 @@ export function toolContextForWorkspace(cwd: string): ToolContext {
       dataRoot: config.paths.home,
       userHome: homedir(),
     }),
+    // 通行证**每请求一份**：换一条消息就作废 ⇒ "批准过"不会被下一条消息继承
+    permits: createEscapePermits(),
   });
 }
 

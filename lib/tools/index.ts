@@ -11,6 +11,7 @@
 
 import type { ToolDefinition, ToolResult } from "../types";
 import type { RegisteredTool, ToolExecutorOptions, ToolHooks } from "./types";
+import type { EscapePermits } from "../permission/tool-escape";
 import { createListTool } from "./list";
 import { createReadTool } from "./read";
 import { createWriteNoteTool } from "./write-note";
@@ -97,6 +98,12 @@ export type ToolContext = {
   /** 文件工具的围栏根：所有文件工具都关在它里面（`resolveInsideWorkspace`） */
   workspaceRoot: string;
   /**
+   * 一次性通行证（C55）：人批准某次越界后，围栏放行**那一个目标一次**。
+   * **每请求一份**（`_pipeline/context` 创建）—— 换一条消息就作废，
+   * 所以"批准过"不会被下一条消息继承（详案 4.6 ③）。
+   */
+  permits?: EscapePermits;
+  /**
    * 技能根**列表**，按优先级（见 `lib/resources` 的四层）：
    * 在**工作区之外**，只有 `skill` 工具读它（见 `lib/tools/skill/index.ts` 头部）。
    */
@@ -121,14 +128,14 @@ export function createToolRegistry(
   const registry = new ToolRegistry();
 
   for (const tool of [
-    createListTool(context.workspaceRoot),
-    createReadTool(context.workspaceRoot),
-    createWriteNoteTool(context.workspaceRoot),
-    createWriteTool(context.workspaceRoot),
-    createEditTool(context.workspaceRoot),
-    createDeleteTool(context.workspaceRoot),
-    createGrepTool(context.workspaceRoot),
-    createFindTool(context.workspaceRoot),
+    createListTool(context.workspaceRoot, context.permits),
+    createReadTool(context.workspaceRoot, context.permits),
+    createWriteNoteTool(context.workspaceRoot, context.permits),
+    createWriteTool(context.workspaceRoot, context.permits),
+    createEditTool(context.workspaceRoot, context.permits),
+    createDeleteTool(context.workspaceRoot, context.permits),
+    createGrepTool(context.workspaceRoot, context.permits),
+    createFindTool(context.workspaceRoot, context.permits),
     createBashTool(context.workspaceRoot),
   ]) {
     registry.register(tool);

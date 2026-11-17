@@ -6,9 +6,8 @@
 // 并 await；前端弹框后调 POST /api/chat/approve 回传决定，这里负责
 // 把「toolCallId → 用户决定」联系起来。
 //
-// B1-④ 扩展：PendingApproval 带 toolName（approve 接口要据此写
-// "本会话/一直允许"记忆），resolve 收 ApprovalOutcome（单次/会话/
-// 持久/拒绝/超时），不再只是 boolean。
+// ⭐ 2026-11-17：结果只剩 `approved | denied | timeout`，而且 approve 接口
+// **不再写任何记忆**（"本会话允许 / 一直允许"已删，见 C55 补记 14）。
 //
 // 为什么挂 globalThis 而不是模块级变量：Next dev server 可能开多个
 // worker，每个 worker 有独立的模块实例——SSE 请求（挂起确认）和
@@ -19,8 +18,14 @@
 import type { ApprovalOutcome } from "./permission/approval-outcome";
 
 export type PendingApproval = {
-  /** 被确认的工具名（approve 接口写记忆时用） */
+  /** 被确认的工具名（轨迹审计 / 调试时对得上号） */
   toolName: string;
+  /**
+   * 越界调用的**一次性凭据发放口**（C55）：人点头时调它，围栏消费一次就作废。
+   * 为什么要挂在这里：凭据活在 chat 请求的闭包里，而"批准"来自**另一个** HTTP
+   * 请求（approve）—— 挂起表是两者唯一的交集。
+   */
+  grant?: () => void;
   /** 用户做出决定时调用；返回给 await 中的 beforeToolCall */
   resolve: (outcome: ApprovalOutcome) => void;
   /** 超时定时器（自动拒绝） */

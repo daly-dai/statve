@@ -8,11 +8,15 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { relative } from "node:path";
 import type { RegisteredTool } from "../types";
+import type { EscapePermits } from "../../permission/tool-escape";
 import { resolveInsideWorkspace, stringArg } from "../path-utils";
 import { countOccurrences } from "../shared";
 import { text } from "../../message";
 
-export function createEditTool(workspaceRoot: string): RegisteredTool {
+export function createEditTool(
+  workspaceRoot: string,
+  permits?: EscapePermits,
+): RegisteredTool {
   return {
     name: "edit_file",
     description:
@@ -39,6 +43,7 @@ export function createEditTool(workspaceRoot: string): RegisteredTool {
       const filePath = resolveInsideWorkspace(
         workspaceRoot,
         stringArg(args.path, ""),
+        permits,
       );
       const oldText = stringArg(args.oldText, "");
       if (!oldText) {

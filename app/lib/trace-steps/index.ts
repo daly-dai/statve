@@ -313,20 +313,28 @@ function closeTool(
   state.openTools.delete(`${state.runIndex}:${event.toolCallId}`);
 }
 
-/** 只记「有干预」的审批：放行是默认路径，记下来只会淹掉真正的信号 */
+/** 审批动作 → 视图标签（放行/拦截/改写各有一个名字，避免嵌套三元） */
+const PERMISSION_LABELS = {
+  allow: "审批放行",
+  block: "审批拦截",
+  rewrite: "参数改写",
+} as const;
+
+/** 只记「有干预」的审批：放行是默认路径，记下来只会淹掉真正的信号
+ *  ⭐ 例外（C55 补记 14）：带 `reason` 的放行 = 人批了一条越界调用，要留痕 */
 function foldPermission(
   state: FoldState,
   event: Extract<AgentEvent, { type: "tool_permission" }>,
   id: string,
 ): void {
-  if (event.action === "allow") return;
+  if (event.action === "allow" && !event.reason) return;
 
   state.records.push({
     id,
     kind: "signal",
     runIndex: state.runIndex,
     turn: state.turn,
-    label: event.action === "block" ? "审批拦截" : "参数改写",
+    label: PERMISSION_LABELS[event.action],
     text: [event.toolName, event.reason].filter(Boolean).join(" · "),
   });
 }

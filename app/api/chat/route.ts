@@ -29,18 +29,18 @@ import {
   runControllers,
   config,
 } from "@/lib";
-import type { ToolCallContent, ToolDecision } from "@/lib";
+import type { ToolCallContent, ToolDecision, ToolContext } from "@/lib";
 import type { StreamFrame } from "./_pipeline/frames";
-import { decideToolCall, type ApprovalOutcome } from "./_pipeline/approval";
+import {
+  decideToolCall,
+  type ApprovalOutcome,
+  type EscapeDanger,
+} from "./_pipeline/approval";
 import { selectModelSafe } from "./_pipeline/model";
 import { createRequestContext, createSessionStore } from "./_pipeline/context";
 import { runPipeline } from "./_pipeline/index";
 import { computeContextPressure } from "./_pipeline/context";
-import { isReadOnlyBash } from "@/lib/permission/readonly";
-import {
-  isPersistApproved,
-  isSessionApproved,
-} from "@/lib/permission/approval-memory";
+import type { AgentEvent } from "@/lib/types";
 
 // 显式声明 Node runtime：本路由（以及它的工具）会用 node:fs / node:path，
 // 后面 Phase 4 还要用 node:child_process 跑终端。
@@ -114,6 +114,11 @@ export async function POST(req: NextRequest) {
     modelLabel,
   });
 
+  // 新会话的标题：默认叫「新会话」，用户说的第一句话发出去之后换成那句话
+  // （2026-11-17 用户定）。只在"还没有任何消息 + 没手动改过名"时才改；
+  // 改不动就算了 —— 标题不该让这次对话失败。
+  await sessionManager.adoptFirstMessageAsTitle(sessionId, text.trim());
+
   // 创建文本编码器
   const encoder = new TextEncoder();
 
@@ -170,7 +175,15 @@ export async function POST(req: NextRequest) {
           // 这次请求的环境：围栏根 = 本会话的工作空间，技能根由它派生（每请求一份，
           // 不再是模块常量 —— 那是 F2「所有会话共用第一个工作空间」的来源）
           toolContext,
-          beforeToolCall: (call) => handleToolApproval(call, send, sessionId),
+          beforeToolCall: (call) =>
+            handleToolApproval({
+              call,
+              send,
+              toolContext,
+              // 审批结论也要进轨迹（C55 补记 14）：引擎只在"非放行"时发
+              // tool_permission，**批准了的越界在轨迹里原本什么都不留**。
+              record: (event: AgentEvent) => recorder.record(event),
+            }),
         });
       } catch (e) {
         runError = (e as Error).message;
@@ -253,67 +266,98 @@ export async function DELETE(req: NextRequest) {
 // 引擎每次想调工具都会先来这里（beforeToolCall 钩子）。
 // 两层把关：
 //   1. 硬性安全策略：secret/秘密 文件名直接拦，不弹框（这类永远不该发生）
-//   2. 人工确认：写/改/删工具推确认帧给前端弹框，用户当场允许/拒绝
-// 只读工具（list/read/grep/find）默认放行。
+//   2. 人工确认：写/改/删工具 + bash 推确认帧给前端弹框，用户当场允许/拒绝
+// 只读工具（list/read/grep/find）默认放行 —— ⚠️ 这里说的"只读"是**工具**，
+// 不是 bash 命令：bash 不管读还是写**一样弹框**（C55 补记 14 删掉了静态分析）。
 // 超时兜底：用户 5 小时不回应自动拒绝（block），避免挂起（前端不展示时间）。
 
 // 人工确认超时：默认 5 小时（用户要长时间思考/离开也不该被打断；是"兜底防挂死"，
 // 不是"催促"——前端已不展示任何时间提示）。可用 APPROVAL_TIMEOUT_MS 环境变量覆盖。
 const APPROVAL_TIMEOUT_MS = config.approval.timeoutMs;
 
-async function handleToolApproval(
-  call: ToolCallContent,
-  send: (frame: StreamFrame) => void,
-  sessionId: string,
-): Promise<ToolDecision> {
-  // 决策交给纯函数 decideToolCall（_pipeline/approval.ts，已单测覆盖）：
+async function handleToolApproval(params: {
+  call: ToolCallContent;
+  send: (frame: StreamFrame) => void;
+  toolContext: ToolContext;
+  /** 把审批结论写进轨迹（越界被批准时引擎不会发事件，需要在这里补一条） */
+  record: (event: AgentEvent) => void;
+}): Promise<ToolDecision> {
+  const { call, send, toolContext, record } = params;
+  // 决策交给纯函数 decideToolCall（_pipeline/approval/index.ts，已单测覆盖）：
   //   - allow / block / rewrite → 直接用决策
-  //   - request → 需要人工确认：这里执行副作用（日志 + 挂起弹框）
-  const decision = await decideToolCall(call, {
-    sessionId,
-    // 「一直允许」是跨会话的：落数据根，不落会话目录
-    approvalDir: config.paths.home,
+  //   - request → 需要人工确认：这里执行副作用（推帧 + 挂起弹框 + 记轨迹）
+  const decision = decideToolCall(call, {
+    // 越界判定基准 = 这个会话的工作空间（值来自会话头，不是全局配置）
+    workspaceRoot: toolContext.workspaceRoot,
     getApprovalMode,
-    isReadOnlyBash,
-    isPersistApproved,
-    isSessionApproved,
   });
   if (decision.action !== "request") return decision;
 
-  const outcome = await askUserApproval(call, send);
+  const outcome = await askUserApproval({
+    call,
+    send,
+    danger: decision.danger,
+    // 人点头之后，把"这一次的目标"发成一次性凭据；围栏消费一次就作废
+    grant: () => toolContext.permits?.grant(decision.danger?.targets ?? []),
+  });
 
-  // 为什么不再写 approval.jsonl（C52，2026-11-11）：审批决策本来就进轨迹
-  // （引擎的 tool_permission 事件带 action/reason/改写前后参数），而侧车
-  // 只有人写、没人读。要查"这个会话批准过什么"→ 翻它的 trace.*.jsonl。
-
-  // B1-④：单次/本会话/一直允许 都是"允许"（记忆在 approve 接口里写）
-  if (
-    outcome === "approved" ||
-    outcome === "approved-session" ||
-    outcome === "approved-persist"
-  ) {
+  if (outcome === "approved") {
+    // ⭐ 审计（C55 补记 14）：引擎只在 block / rewrite 时发 tool_permission，
+    // 所以"越界被批准"在轨迹里原本是一个**空档** —— 事后翻 trace 只看到一次
+    // 普通工具调用，看不出它出过工作区、更看不出是人批的。
+    // 这里补一条 action=allow 的 tool_permission（带目标），DSH 对应的做法是
+    // 会话事件 `approval/asked` + `approval/decided`。
+    if (decision.danger) {
+      record({
+        type: "tool_permission",
+        toolCallId: call.id,
+        toolName: call.name,
+        action: "allow",
+        reason: `越界调用已获人工批准：${decision.danger.targets.join("、")}`,
+        originalArgs: call.arguments,
+        args: call.arguments,
+      });
+    }
     return { action: "allow" };
   }
+
   return {
     action: "block",
-    reason:
-      outcome === "timeout"
-        ? "审批超时未回应，自动拒绝。"
-        : "用户拒绝了本次工具调用。",
+    reason: denyReason(outcome, decision.danger),
   };
 }
 
+/**
+ * 拒绝时回给模型的理由。
+ * 越界被拒要说清"拒的是越界"（连带目标）：只说"用户拒绝了"，模型下一轮
+ * 会照原样再试一次 —— 它不知道问题出在路径上。
+ */
+function denyReason(outcome: ApprovalOutcome, danger?: EscapeDanger): string {
+  if (outcome === "timeout") return "审批超时未回应，自动拒绝。";
+  if (danger) {
+    return `用户拒绝了这次越界到工作空间之外的调用（${danger.targets.join("、")}）。`;
+  }
+  return "用户拒绝了本次工具调用。";
+}
+
 /** 挂起一次人工确认：推帧 → 注册 pending → 返回 Promise（approve 接口或超时来 resolve） */
-function askUserApproval(
-  call: ToolCallContent,
-  send: (frame: StreamFrame) => void,
-): Promise<ApprovalOutcome> {
+function askUserApproval(params: {
+  call: ToolCallContent;
+  send: (frame: StreamFrame) => void;
+  /** 越界提示（普通写操作没有） */
+  danger?: EscapeDanger;
+  /** 人批准后发放一次性凭据（越界才需要） */
+  grant?: () => void;
+}): Promise<ApprovalOutcome> {
+  const { call, send, danger, grant } = params;
+
   return new Promise((resolve) => {
     send({
       type: "tool_permission_request",
       toolCallId: call.id,
       toolName: call.name,
       args: call.arguments,
+      ...(danger ? { danger } : {}),
     });
 
     // 超时兜底：5 小时不回应自动拒绝（timeout），run 不会被挂死（前端不展示时间）
@@ -324,6 +368,8 @@ function askUserApproval(
 
     toolApprovals.set(call.id, {
       toolName: call.name,
+      // approve 路由在"允许"时调它 —— 这是凭据跨越两个 HTTP 请求的唯一通路
+      ...(grant ? { grant } : {}),
       resolve: (outcome: ApprovalOutcome) => {
         clearTimeout(timer);
         toolApprovals.delete(call.id);

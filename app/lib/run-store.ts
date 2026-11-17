@@ -290,7 +290,6 @@ export const useRunStore = create<RunStore>()((set, get) => ({
       await approveTool({
         toolCallId: pending.toolCallId,
         ...decision,
-        sessionId,
       });
     } catch {
       // 404 = 已超时/已处理，无需处理
