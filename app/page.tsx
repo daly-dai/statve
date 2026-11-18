@@ -47,11 +47,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import styles from "./page.module.css";
 import { Nameplate } from "./components/nameplate";
-import { MessageRow } from "./components/message-row";
+import { Transcript } from "./components/transcript";
+import { buildTranscript } from "./lib/transcript";
 import { TraceViewer } from "./components/trace-viewer";
 import { SessionList } from "./components/session-list";
 import { ApprovalDialog } from "./components/approval-dialog";
-import { ApprovalModeSwitch } from "./components/approval-mode-switch";
+import { ApprovalModeMenu } from "./components/approval-mode-menu";
 import { TaskPanel } from "./components/task-panel";
 import { AskUserCard } from "./components/ask-user-card";
 import { CommandMenu } from "./components/command-menu";
@@ -221,6 +222,18 @@ export default function Home() {
   //   滚动容器，自己用同一个 hook，页面不必再管。）
   const followTranscript = useStickyScroll(transcriptRef);
 
+  // 消息 → 回合（纯函数，逐帧重算；messages 引用没变就不重算）
+  const turns = useMemo(() => buildTranscript(messages), [messages]);
+
+  // 当前会话属于哪个工作空间（空会话时把它显示在输入框卡片顶部 —— 只读）
+  const workspaceName = useMemo(
+    () =>
+      groups.find((group) =>
+        group.sessions.some((session) => session.id === currentId),
+      )?.title,
+    [groups, currentId],
+  );
+
   useEffect(() => {
     if (followTranscript) scrollToEnd(transcriptRef.current);
   }, [messages, followTranscript]);
@@ -327,6 +340,7 @@ export default function Home() {
         <main
           className={styles.stage}
           data-tabs={showTabs ? undefined : "none"}
+          data-empty={emptyAttr(showTabs)}
         >
           {/* 1. 会话标题行（右栏第一行）：标题 + 模型名。
               新会话（标题空 / 还是「新会话」）不显示标题，只留右边 —— 规则在组件里。 */}
@@ -368,32 +382,20 @@ export default function Home() {
               代价：切走再回来，转录稿的滚动位置会丢（组件卸载了）。
               一期先接受；要保住就得两个都挂着用 visibility 藏，不值当。 */}
           {tab === "chat" ? (
-            <div className={styles.transcript} ref={transcriptRef}>
+            <div
+              className={styles.transcript}
+              ref={transcriptRef}
+              data-role="transcript"
+            >
               <div className={styles.reel}>
-                {/* 逐条渲染。attached：工具结果行从属于上一条消息（视觉上缩进连接）
-                    live：最后一条且正在加载 → 流式增长动画
-                    ⚠️ 2026-11-17：空态那套起手式引导（<Overture>）整块删了 ——
-                    "多轮对话 · 会话记忆已开启 / 给它一个目标…" 和四个例句按钮
-                    都是早期教学阶段的脚手架，用户明确不再需要。 */}
-                {messages.map((msg, i) => {
-                  // B17③：toolOutputs 只下发给"含 toolCall 的 assistant 行"。
-                  // 为什么不能全量传：toolOutputs 是每帧新对象，MessageRow 又
-                  // 是 memo 组件——若每行都收新引用，memo 浅比较全部失效，
-                  // 流式就退回全树重渲。只有渲染 toolCall 的行才消费它
-                  // （bash 实时输出挂在 ToolCallLine 下），其余行传 undefined。
-                  const needsLiveOutput =
-                    msg.role === "assistant" &&
-                    msg.content.some((block) => block.type === "toolCall");
-                  return (
-                    <MessageRow
-                      key={`${msg.role}-${msg.timestamp}-${i}`}
-                      message={msg}
-                      attached={i > 0 && msg.role === "toolResult"}
-                      live={loading && i === messages.length - 1}
-                      toolOutputs={needsLiveOutput ? toolOutputs : undefined}
-                    />
-                  );
-                })}
+                {/* C57：转录稿按**回合**渲染（一次对话 = 一个回合），不再一条消息一行。
+                    折叠规则、工具行、最终回答的切法都在 <Transcript> / app/lib/transcript 里；
+                    页面只负责两件事：把消息折成回合（纯函数）、告诉它这一轮还在不在跑。 */}
+                <Transcript
+                  turns={turns}
+                  streaming={loading}
+                  toolOutputs={toolOutputs}
+                />
                 {/* 上下文压缩进行中（B2）：后端在调模型生成摘要，给用户明确反馈，
                   而不是让 transcript 停在原地像卡住 */}
                 {compacting && (
@@ -430,14 +432,8 @@ export default function Home() {
             />
           )}
 
-          {/* 审批模式切换（B1-②）：运行时切信任档位（建议/YOLO/禁止），
-              参考项目都有此入口；默认 suggest 不动它即可 */}
-          <div className={styles.modeBar}>
-            <ApprovalModeSwitch
-              mode={approvalMode}
-              onChange={switchApprovalMode}
-            />
-          </div>
+          {/* 审批模式切换搬进输入台卡片（C57，见 .consoleActions）—— 它属于
+              "发送这次 run 用什么信任档"，跟发送按钮是一组，不再是独立一行。 */}
 
           {/* 任务面板（Phase 5）：钉在输入台上方，与输入框同列宽（830 居中）。
               只读展示（todo 唯一写者是模型）；头部常驻显示进度，展开看明细；
@@ -478,92 +474,134 @@ export default function Home() {
                 <AskUserCard ask={pendingAsk} onAnswer={answerAsk} />
               </div>
             )}
-            <form
-              className={`${styles.console}${
-                pendingApproval || pendingAsk ? ` ${styles.consoleCovered}` : ""
-              }`}
-              onSubmit={(e) => {
-                e.preventDefault();
-                submit();
-              }}
-            >
-              <div className={styles.consoleFrame}>
-                {/* C13 命令补全面板：贴输入框上方浮起；键盘导航在 textarea
+            {/* 输入台容器（C57）：**结构固定** —— 空会话 ↔ 有对话只换 data-empty 与
+                CSS，绝不换父级（换父级会重挂 textarea，焦点和没发出去的字一起丢；
+                DSH 在 EmptyHero.tsx 顶部专门写了这条）。 */}
+            <div className={styles.composerArea}>
+              {emptyHero(!showTabs)}
+              <form
+                className={`${styles.console}${
+                  pendingApproval || pendingAsk
+                    ? ` ${styles.consoleCovered}`
+                    : ""
+                }`}
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  submit();
+                }}
+              >
+                <div className={styles.consoleFrame}>
+                  {/* 空会话：工作空间落在卡片内部的顶部左侧 —— 纯文本（位置先占住；
+                      以后要能切换，把它换成 button + 菜单，排版不用动） */}
+                  {workspaceRow(!showTabs, workspaceName)}
+                  {/* C13 命令补全面板：贴输入框上方浮起；键盘导航在 textarea
                     onKeyDown 处理（焦点始终在输入框，只移高亮项）。
                     display:contents —— 包裹 div 不生成盒模型，不占 consoleFrame
                     grid 的子项位（否则 popup 会把两列布局撑成两行），
                     popup 的 absolute 定位祖先仍是 consoleFrame。 */}
-                {commandMenuOpen && (
-                  <div ref={commandMenuRef} className={styles.commandLayer}>
-                    <CommandMenu
-                      commands={filteredCommands}
-                      activeIndex={commandActiveIndex}
-                      onActiveChange={setCommandActiveIndex}
-                      onPick={pickCommand}
-                    />
-                  </div>
-                )}
-                {/* C8 T6 · R4-1：行首挂着一个技能 → 框内上沿一个可点的标签。
+                  {commandMenuOpen && (
+                    <div ref={commandMenuRef} className={styles.commandLayer}>
+                      <CommandMenu
+                        commands={filteredCommands}
+                        activeIndex={commandActiveIndex}
+                        onActiveChange={setCommandActiveIndex}
+                        onPick={pickCommand}
+                      />
+                    </div>
+                  )}
+                  {/* C8 T6 · R4-1：行首挂着一个技能 → 框内上沿一个可点的标签。
                     放在 textarea **之前**：consoleFrame 是两列 grid，它 grid-column
                     1/-1、自然落在第一行，textarea 与右侧按钮仍在第二行 */}
-                {armedSkill && (
-                  <SkillChip name={armedSkill.name} onClear={clearArmedSkill} />
-                )}
-                <textarea
-                  className={styles.consoleInput}
-                  ref={inputRef}
-                  rows={1}
-                  value={input}
-                  onChange={(e) => handleInputChange(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  onBlur={handleBlur}
-                  placeholder={composerPlaceholder(hasSession)}
-                  disabled={composerDisabled}
-                  autoFocus
-                />
-                {/* 上下文占用圆环（C13，抄 DSH ContextMeter）：发送按钮旁，
-                    压缩后回落——占用感知的直观闭环 */}
-                {/* 右侧控件组：圆环 + 发送/停止按钮。
-                    必须包成一个 grid 子项（col2），否则圆环会当第三个
-                    grid 子项把按钮挤到下一行（三级布局 bug，见 .consoleActions） */}
-                <div className={styles.consoleActions}>
-                  <ContextMeter pressure={contextPressure} />
-                  {/* 发送按钮在 run 进行中「变身」为停止按钮：
+                  {armedSkill && (
+                    <SkillChip
+                      name={armedSkill.name}
+                      onClear={clearArmedSkill}
+                    />
+                  )}
+                  <textarea
+                    className={styles.consoleInput}
+                    ref={inputRef}
+                    rows={1}
+                    value={input}
+                    onChange={(e) => handleInputChange(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    onBlur={handleBlur}
+                    placeholder={composerPlaceholder(hasSession)}
+                    disabled={composerDisabled}
+                    autoFocus
+                  />
+                  {/* 工具栏（三层里的第三层）：左 = 这次 run 用什么信任档，
+                      右 = 占位圆环 + 发送/停止。整行横跨卡片（grid-column 1/-1）。 */}
+                  <div className={styles.consoleActions}>
+                    <ApprovalModeMenu
+                      mode={approvalMode}
+                      onChange={switchApprovalMode}
+                    />
+                    <div className={styles.consoleActionsRight}>
+                      <ContextMeter pressure={contextPressure} />
+                      {/* 发送按钮在 run 进行中「变身」为停止按钮：
                       位置永远不变（操作跟随视线），角色随 loading 切换。
                       stop 需要 runId（来自 SSE run 帧），未到时短暂不可点 */}
-                  {loading ? (
-                    <button
-                      className={styles.consoleStop}
-                      type="button"
-                      onClick={() => stop(runId)}
-                      disabled={!runId}
-                    >
-                      停止
-                    </button>
-                  ) : (
-                    <button
-                      className={styles.consoleSend}
-                      type="submit"
-                      disabled={!input.trim() || !hasSession}
-                    >
-                      发送
-                    </button>
-                  )}
+                      {loading ? (
+                        <button
+                          className={styles.consoleStop}
+                          type="button"
+                          onClick={() => stop(runId)}
+                          disabled={!runId}
+                          aria-label="停止"
+                          title="停止这次运行"
+                        >
+                          <svg
+                            width="10"
+                            height="10"
+                            viewBox="0 0 10 10"
+                            aria-hidden="true"
+                          >
+                            <rect
+                              width="10"
+                              height="10"
+                              rx="1.5"
+                              fill="currentColor"
+                            />
+                          </svg>
+                        </button>
+                      ) : (
+                        <button
+                          className={styles.consoleSend}
+                          type="submit"
+                          disabled={!input.trim() || !hasSession}
+                          aria-label="发送"
+                          title="发送（Enter）"
+                        >
+                          <svg
+                            width="15"
+                            height="15"
+                            viewBox="0 0 16 16"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.8"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                          >
+                            <path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-              {/* 输入台底栏（A3，参考 DSH）：左 = 会话级读数，右 = 操作提示。
+                {/* 输入台底栏（A3，参考 DSH）：左 = 会话级读数，右 = 操作提示。
                   读数原本长在 <TraceRail> 底部，轨迹栏下线后搬到这里——
                   这样"会话跑了多少"在任何 tab 下都看得见。 */}
-              <div className={styles.statusBar}>
-                <span className={styles.statusStats}>
-                  {stats.turns} 轮 · {stats.tools} 工具 ·{" "}
-                  {formatTokens(stats.tokens)} token
-                </span>
-                <span className={styles.statusHint}>
-                  {composerHint(hasSession)}
-                </span>
-              </div>
-            </form>
+                <div className={styles.statusBar}>
+                  <span className={styles.statusStats}>
+                    {stats.turns} 轮 · {stats.tools} 工具 ·{" "}
+                    {formatTokens(stats.tokens)} token
+                  </span>
+                </div>
+              </form>
+            </div>
           </div>
         </main>
       </div>
@@ -606,12 +644,6 @@ function composerPlaceholder(hasSession: boolean): string {
     : "先在工作空间里开一个会话，再给它目标";
 }
 
-function composerHint(hasSession: boolean): string {
-  return hasSession
-    ? "Enter 发送 · Shift + Enter 换行 · 每次发送开始新的一次 run"
-    : "还没有会话：点左侧工作空间组头的 ＋，或新增一个工作空间（会自动开会话）";
-}
-
 /**
  * 会话的显示标签（**和侧栏那一行的标签同一条链**：标题 ?? 首条消息 ?? 空）。
  * 提到模块层是为了不把 `find + 可选链` 的分支记到 Home 的圈复杂度上。
@@ -644,6 +676,45 @@ function hasConversation(
 }
 
 // ============ 状态推导（纯函数，跟着页面走） ============
+
+/**
+ * 空会话的几个"小零件"。都拆成模块级函数而不是写在 JSX 里 ——
+ * 一是 Home 的圈复杂度已经很紧（ESLint complexity ≤ 20），
+ * 二是这三样只在空会话出现，放在一起读着更清楚。
+ */
+
+/** 空会话才有 `data-empty`（给 CSS 换布局用；undefined 表示不写这个属性） */
+function emptyAttr(hasChat: boolean): string | undefined {
+  return hasChat ? undefined : "";
+}
+
+/** 空会话的品牌行：输入框卡片上方居中 */
+function emptyHero(empty: boolean) {
+  if (!empty) return null;
+  return (
+    <div className={styles.hero}>
+      <div className={styles.brand}>
+        <span className={styles.brandMark} aria-hidden="true">
+          s
+        </span>
+        <span className={styles.brandName}>statve</span>
+      </div>
+    </div>
+  );
+}
+
+/** 空会话："这条会话属于哪个工作空间" —— 纯文本，落在输入框卡片内部顶部左侧 */
+function workspaceRow(empty: boolean, name: string | undefined) {
+  if (!empty || name === undefined) return null;
+  return (
+    <div className={styles.wsRow}>
+      <span className={styles.wsMark} aria-hidden="true">
+        ▸
+      </span>
+      <span className={styles.wsName}>{name}</span>
+    </div>
+  );
+}
 
 function scrollToEnd(box: HTMLDivElement | null) {
   box?.scrollTo(0, box.scrollHeight);

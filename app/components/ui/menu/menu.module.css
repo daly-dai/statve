@@ -59,6 +59,12 @@
   right: 0;
 }
 
+/* 向上开：屏幕底部的触发器（输入台工具栏）用这个，否则面板会被视口切掉 */
+.panel[data-placement="up"] {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
 /* 侧开（side）：位置由 JS 量取后以 position:fixed 内联指定——
    会话行 ⋯ 用它时，弹框要浮出滚动容器（.sessionList 是 overflow-y:auto，
    absolute 会被裁剪），所以必须 fixed 到视口坐标，避开裁剪。
@@ -114,6 +120,26 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 名字 + 一行说明：说明换行时左缘对齐名字，不缩进（grid 的第二行） */
+.itemText {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.itemDesc {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-faint);
+}
+
+/* 单选菜单的选中标记：不占位时也留着这一列，免得"有没有 ✓"让文字左右跳 */
+.itemCheck {
+  font-size: 11px;
+  color: var(--ink);
 }
 
 .itemHint {

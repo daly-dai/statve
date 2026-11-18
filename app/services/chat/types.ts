@@ -22,7 +22,7 @@ export type ChatHistoryResult = {
 /**
  * POST /api/chat/approve 参数：回传用户对挂起确认的决定。
  * ⭐ 2026-11-17 只剩"允许 / 拒绝"（C55 补记 14）：本会话允许 / 一直允许已删 ——
- * 审批不产生记忆，想整轮不被打断走 `<ApprovalModeSwitch>`。
+ * 审批不产生记忆，想整轮不被打断走 `<ApprovalModeMenu>`。
  */
 export type ApproveParams = {
   toolCallId: string;

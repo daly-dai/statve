@@ -1,0 +1,79 @@
+/* ============================================================
+   approval-mode-menu.module.css —— 审批模式下拉（C57 尾巴，2026-11-18）
+   归属组件：app/components/approval-mode-menu/index.tsx
+   ============================================================
+   触发器只有 22px 高（原来的三个 chip 是 34px），但**命中区**按本项目的
+   `--hit: 34px` 判据用 ::before 撑出来：看得见的小，点得着的大。
+   面板的定位、投影、圆角、焦点样式都住 `ui/menu` 原语里 —— 这里只管宽度。
+   ============================================================ */
+
+.trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-mid);
+  cursor: pointer;
+  transition:
+    color 0.12s,
+    background-color 0.12s;
+}
+
+/* 视觉 22 / 命中 34：向外扩 6px 的透明层 */
+.trigger::before {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 8px;
+}
+
+.trigger:hover {
+  background: var(--feed-hover);
+  color: var(--ink);
+}
+
+.trigger:focus-visible {
+  outline: 2px solid var(--pen-user);
+  outline-offset: 2px;
+}
+
+.trigger[aria-expanded="true"] {
+  background: var(--feed-active);
+}
+
+.label {
+  color: var(--ink-faint);
+}
+
+.value {
+  color: var(--ink);
+}
+
+.caret {
+  font-size: 9px;
+  color: var(--ink-faint);
+  transition: transform 0.16s;
+}
+
+.trigger[aria-expanded="true"] .caret {
+  transform: rotate(180deg);
+}
+
+/* 面板宽一点：每项都带一行说明（黑话翻译），窄了「YOLO」那条会折成两行 */
+.panel {
+  width: 274px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trigger,
+  .caret {
+    transition: none;
+  }
+}

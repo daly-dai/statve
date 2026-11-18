@@ -9,7 +9,7 @@
 //   - 初始值来自 config.approval.mode（env APPROVAL_MODE 可配默认）
 //   - 运行时通过 /api/chat/approval-mode 切换（globalThis 可变，
 //     跨 worker 可见；重启恢复默认）
-//   - 前端切换控件见 app/components/approval-mode-switch/
+//   - 前端切换控件见 app/components/approval-mode-menu/
 // ============================================================
 
 import { config } from "./config";
