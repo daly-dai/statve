@@ -11,6 +11,7 @@ import type {
 import {
   buildTranscript,
   countByCategory,
+  formatElapsed,
   shouldCollapseProcess,
   toolCategoryOf,
 } from "./index";
@@ -303,5 +304,51 @@ describe("shouldCollapseProcess：什么时候默认折起来", () => {
 
   it("失败（stopReason=error）⇒ 展开，哪怕有半截回答", () => {
     expect(shouldCollapseProcess(oneTurn("error"), false)).toBe(false);
+  });
+});
+
+describe("durationMs：这一轮花了多久", () => {
+  it("取回合内最早到最晚的时间戳之差（不是某一条 assistant 的）", () => {
+    // 一轮里有两次模型调用（用户 100 → 助手 2000 → 结果 3000 → 助手 4000）。
+    // 只取「最后一条 assistant」会得到 2000；整轮是 3900 —— 这条钉的就是"整轮"。
+    // 时间戳递增是真实形状：助手消息的 timestamp 在**流读完装配最终消息**时写。
+    const turn = buildTranscript([
+      user("问"),
+      {
+        ...assistant([call("c1", "read_file", { path: "a.md" })]),
+        timestamp: 2000,
+      },
+      { ...result("c1", "read_file", "内容"), timestamp: 3000 },
+      { ...assistant([text("答")]), timestamp: 4000 },
+    ])[0];
+    expect(turn.durationMs).toBe(3900);
+  });
+
+  it("只有一条消息（run 什么都没产出）⇒ 0，不是 undefined", () => {
+    const turn = buildTranscript([user("问")])[0];
+    expect(turn.durationMs).toBe(0);
+  });
+
+  it("两个回合各算各的，不串", () => {
+    const turns = buildTranscript([
+      user("第一问"),
+      { ...assistant([text("第一答")]), timestamp: 2000 },
+      { ...user("第二问"), timestamp: 10_000 },
+      { ...assistant([text("第二答")]), timestamp: 25_000 },
+    ]);
+    expect(turns.map((t) => t.durationMs)).toEqual([1900, 15_000]);
+  });
+});
+
+describe("formatElapsed：时长只有一个写法", () => {
+  // ⭐ 2026-11-18 用户定：跑完的读数与进行中的计时器**共用这一个格式**。
+  // 先前分过两种（`3:16` / `1 分 59 秒`），用户当场否了：一屏里两种写法就是乱的。
+  it("mm:ss，过一小时才带小时位", () => {
+    expect(formatElapsed(0)).toBe("0:00");
+    expect(formatElapsed(999)).toBe("0:00"); // 不足 1 秒也是 0:00（统一的代价）
+    expect(formatElapsed(16_000)).toBe("0:16");
+    expect(formatElapsed(119_000)).toBe("1:59");
+    expect(formatElapsed(192_000)).toBe("3:12");
+    expect(formatElapsed(3_735_000)).toBe("1:02:15");
   });
 });

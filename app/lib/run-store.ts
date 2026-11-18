@@ -70,6 +70,12 @@ export type RunStore = {
    */
   reading: Record<string, ReadingRecord>;
   /**
+   * sessionId → 这一轮 run 的**本机起点**（毫秒墙钟）。产品状态，不进 runs 桶 ——
+   * 桶是"帧折叠出来的、能重放"的数据，而墙钟时间重放不出来（同 `reading` 的理由）。
+   * 侧栏与过程组头的计时器都读它；`loading` 为假时不显示，所以不需要清理逻辑。
+   */
+  runStarted: Record<string, number>;
+  /**
    * 看过这条会话的结局：把已读位置推到最后一次收尾。
    * 没有可推时**原样返回 state** ⇒ 可以在 effect 里放心重复调（不会自激重渲）。
    */
@@ -110,6 +116,7 @@ function replaceRun(
 export const useRunStore = create<RunStore>()((set, get) => ({
   runs: {},
   reading: {},
+  runStarted: {},
 
   markRead: (sessionId) => {
     set((state) => {
@@ -128,6 +135,13 @@ export const useRunStore = create<RunStore>()((set, get) => ({
 
     // 这次 run 的序号（结局记录里的"第几次"）。取在守卫之后：被拦下的调用不占号
     const seq = ++runSeq;
+
+    // 起始时刻（计时器用）。和 reading 一样是**产品状态、不是帧折叠的产物**，
+    // 所以不进 runs 桶（桶要能靠重放重建，墙钟时间重放不出来）。
+    // ⚠️ 刷新后这里就没了 —— 因为刷新后本来也没有 run 在连（C27 还没做）。
+    set((state) => ({
+      runStarted: { ...state.runStarted, [sessionId]: Date.now() },
+    }));
 
     // 建桶起点：freshRun 保留会话内容（messages 跨 run 延续）、清 run 瞬态
     set((state) =>
@@ -246,14 +260,19 @@ export const useRunStore = create<RunStore>()((set, get) => ({
     activeAborts.get(sessionId)?.abort();
     activeAborts.delete(sessionId);
     deletedSessions.add(sessionId);
-    // 桶和阅读记录一起删：会话没了，"你看没看过它的结局"也就没有意义了
+    // 桶、阅读记录、起始时刻一起删：会话没了，"它跑了多久"也就没有意义了
     set((state) => {
-      if (!(sessionId in state.runs) && !(sessionId in state.reading)) {
+      if (
+        !(sessionId in state.runs) &&
+        !(sessionId in state.reading) &&
+        !(sessionId in state.runStarted)
+      ) {
         return state;
       }
       const { [sessionId]: _bucket, ...runs } = state.runs;
       const { [sessionId]: _reading, ...reading } = state.reading;
-      return { runs, reading };
+      const { [sessionId]: _started, ...runStarted } = state.runStarted;
+      return { runs, reading, runStarted };
     });
   },
 
@@ -389,4 +408,13 @@ export function useSessionReading(
   sessionId: string,
 ): ReadingRecord | undefined {
   return useRunStore((s) => s.reading[sessionId]);
+}
+
+/**
+ * 这条会话本轮 run 的**本机起点**（计时器用）。极轻订阅：一个数字，
+ * 只在 `startRun` / `deleteRun` 时变 —— 别的会话每帧更新都不会让这一行重渲。
+ * `undefined` = 没有在跑的 run（或刷新过），调用方据此不显示计时器。
+ */
+export function useRunStarted(sessionId: string): number | undefined {
+  return useRunStore((s) => s.runStarted[sessionId]);
 }

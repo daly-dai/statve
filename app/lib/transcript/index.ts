@@ -115,6 +115,18 @@ export type TranscriptTurn = {
   answer: string;
   /** 回合结局，取回合内最后一条助手消息的 stopReason */
   status: "ok" | "error" | "aborted";
+  /**
+   * 这一轮花了多久（墙钟，含工具等待）= 回合内**最早**与**最晚**消息时间戳之差。
+   *
+   * 为什么用消息时间戳、而不是 `observed` 里的 turn_start/turn_end：
+   * ① 消息时间戳是**落盘**的（`message.timestamp`），所以历史回合也算得出来 —— 刷新后不丢；
+   * ② assistant 的 timestamp 是在**流读完、装配最终消息**时写的（`lib/deepseekModel`），
+   *    所以"最后一条消息的时间戳"≈ 这一轮结束的时刻。⚠️ 一轮里有**多次**模型调用
+   *    （每次工具调用一停），所以必须取**回合内**的最早/最晚，不能取某一条 assistant 的。
+   *
+   * `undefined` = 缺时间戳（老数据 / 一条都没有）⇒ 界面上什么都不显示，**不编数字**。
+   */
+  durationMs?: number;
 };
 
 function textOf(message: AgentMessage): string {
@@ -176,6 +188,25 @@ function sliceTurns(messages: readonly AgentMessage[]): TurnSlice[] {
   return slices;
 }
 
+/**
+ * 一个回合的墙钟时长：取回合内**最早**与**最晚**的消息时间戳之差。
+ * 用 min/max 而不是"首条/末条"，是因为不同来源的消息（用户 / 助手 / 工具结果）
+ * 时间戳不保证严格单调；取极值就不会被顺序问题咬到。
+ * 少于一条带时间戳的消息 ⇒ undefined（不编数字）。
+ */
+function durationOf(messages: readonly AgentMessage[]): number | undefined {
+  let earliest: number | undefined;
+  let latest: number | undefined;
+  for (const message of messages) {
+    const ts = message.timestamp;
+    if (typeof ts !== "number" || !Number.isFinite(ts)) continue;
+    earliest = earliest === undefined ? ts : Math.min(earliest, ts);
+    latest = latest === undefined ? ts : Math.max(latest, ts);
+  }
+  if (earliest === undefined || latest === undefined) return undefined;
+  return latest - earliest;
+}
+
 /** 助手消息的收尾原因 → 回合结局（别写成嵌套三元，读的人要数冒号） */
 function statusOf(
   stopReason: AssistantMessage["stopReason"],
@@ -235,6 +266,7 @@ function foldTurn(slice: TurnSlice, index: number): TranscriptTurn {
     steps: [],
     answer: "",
     status: "ok",
+    durationMs: durationOf(slice.messages),
   };
 
   // 工具结果按 toolCallId 归位（结果总是跟在调用之后）
@@ -324,4 +356,34 @@ export function shouldCollapseProcess(
   live: boolean,
 ): boolean {
   return turn.answer !== "" && turn.status === "ok" && !live;
+}
+
+/** 补零到两位（`3:06`，不是 `3:6`） */
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+/**
+ * 时长**唯一**的写法：`3:16` / `1:02:15`（mm:ss，过一小时带小时位）。
+ *
+ * ⭐ 2026-11-18 用户定：**计时器和跑完后的读数必须同一个格式**。
+ * 我先前分了两种（跑着 `3:16`、跑完 `1 分 59 秒`），理由是"一个是钟、一个是回执" ——
+ * 用户当场否了：同一个数在一屏里出现两种写法就是乱的。
+ *
+ * 为什么统一到 mm:ss（而不是统一到中文）：
+ * ① 侧栏那个时间槽是**定宽**的（现在放 `15:45:32`），`1 小时 12 分` 会把它撑宽、
+ *    把标题挤掉；mm:ss 到 `1:02:15` 也只有 7 个字符。
+ * ② 计时每秒都在变，等宽数字不会让宽度抖动（中文里 `9 秒 → 10 秒` 会多一个字符）。
+ * ③ 一个函数、一个格式 —— 「同一件事只有一处定义」。
+ *
+ * 代价（写在这里，别假装没有）：`0:00` 读起来不像「不到 1 秒」那么有人情味，
+ * 而极短的回合（几百毫秒）就显示 `0:00`。
+ */
+export function formatElapsed(ms: number): string {
+  const total = Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 1000) : 0;
+  const seconds = total % 60;
+  const minutes = Math.floor((total % 3600) / 60);
+  const hours = Math.floor(total / 3600);
+  if (hours > 0) return `${hours}:${pad2(minutes)}:${pad2(seconds)}`;
+  return `${minutes}:${pad2(seconds)}`;
 }

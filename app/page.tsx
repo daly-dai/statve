@@ -225,6 +225,10 @@ export default function Home() {
   // 消息 → 回合（纯函数，逐帧重算；messages 引用没变就不重算）
   const turns = useMemo(() => buildTranscript(messages), [messages]);
 
+  // 本轮 run 的本机起点（过程组头那个计时器用）。和侧栏用的是同一个字段：
+  // `startRun` 写、刷新后为空 —— 因为刷新后本来也没有 run 在连（C27 还没做）。
+  const liveSince = useRunStore((s) => s.runStarted[currentId]);
+
   // 当前会话属于哪个工作空间（空会话时把它显示在输入框卡片顶部 —— 只读）
   const workspaceName = useMemo(
     () =>
@@ -395,6 +399,7 @@ export default function Home() {
                   turns={turns}
                   streaming={loading}
                   toolOutputs={toolOutputs}
+                  liveSince={liveSince}
                 />
                 {/* 上下文压缩进行中（B2）：后端在调模型生成摘要，给用户明确反馈，
                   而不是让 transcript 停在原地像卡住 */}
