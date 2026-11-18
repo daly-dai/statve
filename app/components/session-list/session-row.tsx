@@ -20,8 +20,15 @@
 
 import { useEffect, useRef, type ReactNode } from "react";
 import type { SessionSummary } from "../../lib/use-sessions";
+import type { RunPhase } from "../../lib/run-fold";
 import { formatClock } from "../../lib/format";
-import { useSessionReading, useSessionRunPhase } from "../../lib/run-store";
+import { formatElapsed } from "../../lib/transcript";
+import {
+  useRunStarted,
+  useSessionReading,
+  useSessionRunPhase,
+} from "../../lib/run-store";
+import { useElapsed } from "../../lib/use-elapsed";
 import { sessionDotFor, type DotKind } from "../../lib/session-dot";
 import { Menu } from "../ui/menu";
 import styles from "./session-list.module.css";
@@ -63,6 +70,13 @@ const DOT_TITLES: Record<DotKind, string> = {
   error: "失败了，你还没看",
 };
 
+/** "还没结束"的三个阶段（计时器在这三种状态里都走）。`idle/done/error` 不算。 */
+const LIVE_PHASES: readonly RunPhase[] = [
+  "running",
+  "waiting-approval",
+  "waiting-ask",
+];
+
 export function SessionRow({
   session,
   current,
@@ -97,6 +111,16 @@ export function SessionRow({
     isCurrent: current,
     record: reading,
   });
+
+  // 跑着的时候，右侧那一槽从「时间」变成「跑了多久」（2026-11-18 用户定：甲）。
+  // 多会话并行时，只有侧栏能一眼看到"哪条已经跑了 3 分钟、该去打断它"。
+  //
+  // ⚠️ **三种"还没结束"的阶段都算**（running / 等审批 / 等回答）：卡在等审批的会话
+  // 恰恰最容易一放就是半小时 —— 那正是最该被看见的时刻。点在那儿区分状态
+  // （转圈 / 黄点），计时器只回答"过去多久了"。
+  const startedAt = useRunStarted(session.id);
+  const live = LIVE_PHASES.includes(phase) ? startedAt : undefined;
+  const elapsed = useElapsed(live);
 
   // 行内容三态互斥，优先级：删除确认 > 重命名编辑 > 正常展示。
   // （原先是嵌套三目，"哪一态"要数冒号才看得出来，改成显式分支。）
@@ -183,9 +207,12 @@ export function SessionRow({
         <div className={styles.sessionTitle}>
           {session.title ?? session.preview ?? "新会话"}
         </div>
-        {/* 条数已删（2026-09-01 用户拍板）；时间常驻右侧，悬停时淡出给 ⋯ 让位 */}
+        {/* 条数已删（2026-09-01 用户拍板）；时间常驻右侧，悬停时淡出给 ⋯ 让位。
+            跑着的时候这里换成计时器（3:12）—— 同一个槽，零新增元素。 */}
         <span className={styles.sessionTime}>
-          {formatClock(session.updatedAt)}
+          {elapsed === undefined
+            ? formatClock(session.updatedAt)
+            : formatElapsed(elapsed)}
         </span>
       </>
     );

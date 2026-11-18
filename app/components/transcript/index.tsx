@@ -15,11 +15,13 @@ import { Markdown } from "../../markdown";
 import { SkillCard } from "../skill-card";
 import {
   countByCategory,
+  formatElapsed,
   shouldCollapseProcess,
   type ProcessStep,
   type ToolCategory,
   type TranscriptTurn,
 } from "../../lib/transcript";
+import { useElapsed } from "../../lib/use-elapsed";
 import styles from "./transcript.module.css";
 
 /** 类别 → 摘要里的话。一个回合只挑最多的两类说（其余在 title 里）。
@@ -197,6 +199,10 @@ type ProcessGroupProps = {
   streaming: boolean;
   collapsedByDefault: boolean;
   toolOutputs: Record<string, string> | undefined;
+  /** 跑完之后显示在文案末尾的用时（已格式化；缺时间戳时为空串） */
+  durationLabel: string;
+  /** 进行中的毫秒数（计时器；`undefined` = 还没拿到起点） */
+  liveElapsedMs: number | undefined;
 };
 
 function ProcessGroup({
@@ -204,6 +210,8 @@ function ProcessGroup({
   streaming,
   collapsedByDefault,
   toolOutputs,
+  durationLabel,
+  liveElapsedMs,
 }: ProcessGroupProps) {
   // 用户手动开/关过就以他为准；没表态时**跟着判据走** —— 所以跑完会自己折起来。
   // ⚠️ 不能写成 useState(!collapsedByDefault)：初值只在挂载时算一次，而这一轮是
@@ -211,7 +219,18 @@ function ProcessGroup({
   // 于是"跑完不收、刷新才收"。派生值就没有这个坑。
   const [manual, setManual] = useState<boolean | null>(null);
   const { brief, full } = processSummary(steps);
-  const head = streaming ? liveHead(steps) : brief;
+  // 头的文案 = 读数串：段落之间用 ` · `，空的那段直接不出现
+  // （所以 0 步的回合头是「12 秒」，不是「 · 12 秒」）。
+  const head = (
+    streaming
+      ? [
+          liveHead(steps),
+          liveElapsedMs === undefined ? "" : formatElapsed(liveElapsedMs),
+        ]
+      : [brief, durationLabel]
+  )
+    .filter((part) => part !== "")
+    .join(" · ");
   const canCollapse = !streaming && steps.length > 0;
   const open = canCollapse ? (manual ?? !collapsedByDefault) : true;
 
@@ -325,9 +344,20 @@ type TranscriptProps = {
   /** 本轮 run 还在跑：最后一回合不折叠 */
   streaming: boolean;
   toolOutputs: Record<string, string> | undefined;
+  /** 本轮 run 的本机起点（计时器用；`undefined` = 没有起点就不显示钟） */
+  liveSince: number | undefined;
 };
 
-export function Transcript({ turns, streaming, toolOutputs }: TranscriptProps) {
+export function Transcript({
+  turns,
+  streaming,
+  toolOutputs,
+  liveSince,
+}: TranscriptProps) {
+  // 只有最后一回合可能是"在跑"，所以这里只需要一个计时器。
+  // ⚠️ 必须提到 map 外面：hooks 不能写在循环里。
+  const liveElapsedMs = useElapsed(streaming ? liveSince : undefined);
+
   return (
     <>
       {turns.map((turn, index) => {
@@ -335,6 +365,10 @@ export function Transcript({ turns, streaming, toolOutputs }: TranscriptProps) {
         const live = streaming && isLast;
         // 判据住在 app/lib/transcript（纯函数，可单测）：有回答 + ok + 不在跑 ⇒ 折
         const collapsed = shouldCollapseProcess(turn, live);
+        // 跑完才有「这一轮花了多久」；缺时间戳（老数据）就是空串，界面什么都不显示。
+        // 格式与进行中的计时器**同一个函数**（用户 2026-11-18 定：一屏里不许有两种写法）
+        const durationLabel =
+          turn.durationMs === undefined ? "" : formatElapsed(turn.durationMs);
         return (
           <section
             key={turn.index}
@@ -351,6 +385,8 @@ export function Transcript({ turns, streaming, toolOutputs }: TranscriptProps) {
               streaming={live}
               collapsedByDefault={collapsed}
               toolOutputs={live ? toolOutputs : undefined}
+              durationLabel={durationLabel}
+              liveElapsedMs={live ? liveElapsedMs : undefined}
             />
             {turn.answer !== "" && (
               <>
