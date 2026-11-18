@@ -16,7 +16,6 @@ import { SkillCard } from "../skill-card";
 import {
   countByCategory,
   formatElapsed,
-  shouldCollapseProcess,
   type ProcessStep,
   type ToolCategory,
   type TranscriptTurn,
@@ -363,8 +362,13 @@ export function Transcript({
       {turns.map((turn, index) => {
         const isLast = index === turns.length - 1;
         const live = streaming && isLast;
-        // 判据住在 app/lib/transcript（纯函数，可单测）：有回答 + ok + 不在跑 ⇒ 折
-        const collapsed = shouldCollapseProcess(turn, live);
+        // 过程组默认折不折：**只要不在跑就折**，不管结局是 ok / 失败 / 被打断。
+        // ⭐ 2026-11-18 用户改的规则。之前是「有回答才折；失败 / 被打断 / 没回答都摊开」，
+        // 理由是"出事的时候过程就是线索"——但用户按了停止之后的第一反应是"把它收起来"，
+        // 摊在那儿反而是噪音。出事的信息一样没丢：头上那行（类别摘要 + 时长）还在，
+        // 下面还有「本轮被停止 / 本轮失败 / 本轮没有产出回答」。
+        // 想看过程？点行首箭头。
+        const collapsed = !live;
         // 跑完才有「这一轮花了多久」；缺时间戳（老数据）就是空串，界面什么都不显示。
         // 格式与进行中的计时器**同一个函数**（用户 2026-11-18 定：一屏里不许有两种写法）
         const durationLabel =

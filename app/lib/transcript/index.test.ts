@@ -12,7 +12,6 @@ import {
   buildTranscript,
   countByCategory,
   formatElapsed,
-  shouldCollapseProcess,
   toolCategoryOf,
 } from "./index";
 
@@ -275,38 +274,6 @@ describe("真实形状：16 条记录折成 1 个回合", () => {
   });
 });
 
-describe("shouldCollapseProcess：什么时候默认折起来", () => {
-  // 一次「读一个文件再回答」的最小回合 —— 四条用例只改一个变量，读 diff 时看得清改了什么
-  const oneTurn = (stopReason: AssistantMessage["stopReason"] = "stop") =>
-    buildTranscript([
-      user("问"),
-      assistant([call("c1", "read_file", { path: "a.md" })]),
-      result("c1", "read_file", "内容"),
-      assistant([text("答")], stopReason),
-    ])[0];
-
-  it("有回答 + ok + 不在跑 ⇒ 折", () => {
-    expect(shouldCollapseProcess(oneTurn(), false)).toBe(true);
-  });
-
-  it("正在跑 ⇒ 展开（还在长的时候折起来，等于把正在发生的事藏起来）", () => {
-    expect(shouldCollapseProcess(oneTurn(), true)).toBe(false);
-  });
-
-  it("只有工具、没有回答 ⇒ 展开（没回答本身就是信息）", () => {
-    const turn = buildTranscript([
-      user("问"),
-      assistant([call("c1", "read_file", { path: "a.md" })]),
-      result("c1", "read_file", "内容"),
-    ])[0];
-    expect(shouldCollapseProcess(turn, false)).toBe(false);
-  });
-
-  it("失败（stopReason=error）⇒ 展开，哪怕有半截回答", () => {
-    expect(shouldCollapseProcess(oneTurn("error"), false)).toBe(false);
-  });
-});
-
 describe("durationMs：这一轮花了多久", () => {
   it("取回合内最早到最晚的时间戳之差（不是某一条 assistant 的）", () => {
     // 一轮里有两次模型调用（用户 100 → 助手 2000 → 结果 3000 → 助手 4000）。
@@ -340,15 +307,17 @@ describe("durationMs：这一轮花了多久", () => {
   });
 });
 
-describe("formatElapsed：时长只有一个写法", () => {
-  // ⭐ 2026-11-18 用户定：跑完的读数与进行中的计时器**共用这一个格式**。
-  // 先前分过两种（`3:16` / `1 分 59 秒`），用户当场否了：一屏里两种写法就是乱的。
-  it("mm:ss，过一小时才带小时位", () => {
-    expect(formatElapsed(0)).toBe("0:00");
-    expect(formatElapsed(999)).toBe("0:00"); // 不足 1 秒也是 0:00（统一的代价）
-    expect(formatElapsed(16_000)).toBe("0:16");
-    expect(formatElapsed(119_000)).toBe("1:59");
-    expect(formatElapsed(192_000)).toBe("3:12");
-    expect(formatElapsed(3_735_000)).toBe("1:02:15");
+describe("formatElapsed：时长只有一个写法（中文分秒）", () => {
+  // ⭐ 2026-11-18 用户定的第二版：统一成中文分秒。
+  // 我先后试过「两种写法」和「统一成 mm:ss」，两次都被否 —— 别再走回头路。
+  it("秒 / 分秒 / 小时，取整用 floor", () => {
+    expect(formatElapsed(0)).toBe("不到 1 秒");
+    expect(formatElapsed(999)).toBe("不到 1 秒");
+    expect(formatElapsed(16_000)).toBe("16 秒");
+    expect(formatElapsed(59_900)).toBe("59 秒");
+    expect(formatElapsed(118_800)).toBe("1 分 58 秒"); // 秒表读数：不四舍五入
+    expect(formatElapsed(120_000)).toBe("2 分"); // 整分不写「2 分 0 秒」
+    expect(formatElapsed(3_600_000)).toBe("1 小时");
+    expect(formatElapsed(3_735_000)).toBe("1 小时 2 分");
   });
 });
