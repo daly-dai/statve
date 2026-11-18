@@ -52,7 +52,7 @@ import { buildTranscript } from "./lib/transcript";
 import { TraceViewer } from "./components/trace-viewer";
 import { SessionList } from "./components/session-list";
 import { ApprovalDialog } from "./components/approval-dialog";
-import { ApprovalModeSwitch } from "./components/approval-mode-switch";
+import { ApprovalModeMenu } from "./components/approval-mode-menu";
 import { TaskPanel } from "./components/task-panel";
 import { AskUserCard } from "./components/ask-user-card";
 import { CommandMenu } from "./components/command-menu";
@@ -533,7 +533,7 @@ export default function Home() {
                   {/* 工具栏（三层里的第三层）：左 = 这次 run 用什么信任档，
                       右 = 占位圆环 + 发送/停止。整行横跨卡片（grid-column 1/-1）。 */}
                   <div className={styles.consoleActions}>
-                    <ApprovalModeSwitch
+                    <ApprovalModeMenu
                       mode={approvalMode}
                       onChange={switchApprovalMode}
                     />
@@ -599,9 +599,6 @@ export default function Home() {
                     {stats.turns} 轮 · {stats.tools} 工具 ·{" "}
                     {formatTokens(stats.tokens)} token
                   </span>
-                  <span className={styles.statusHint}>
-                    {composerHint(hasSession)}
-                  </span>
                 </div>
               </form>
             </div>
@@ -645,12 +642,6 @@ function composerPlaceholder(hasSession: boolean): string {
   return hasSession
     ? "给它一个目标，例如：读取 agent-notes.md 并总结要点"
     : "先在工作空间里开一个会话，再给它目标";
-}
-
-function composerHint(hasSession: boolean): string {
-  return hasSession
-    ? "Enter 发送 · Shift + Enter 换行 · 每次发送开始新的一次 run"
-    : "还没有会话：点左侧工作空间组头的 ＋，或新增一个工作空间（会自动开会话）";
 }
 
 /**

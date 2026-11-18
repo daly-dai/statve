@@ -265,8 +265,16 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: end;
+  /* ⭐ 2026-11-18：三个间距是**三个数**，各管一件事（用户定 8 / 4 / 6）：
+       ① 文字 → 工具栏           = gap           = 8
+       ② 工具栏 → 卡片下沿        = padding-bottom = 4
+       ③ 卡片下沿 → 底栏读数      = .statusBar 的 margin-top = 6
+     ② 从 11 收到 4：原来卡片下沿到那颗 34px 发送圆还留着 11px，比上面的 8px 还松，
+     整块"底重、上挤"。收完之后卡高 88 → 81，圆是"落"在卡片上的。
+     ⚠️ 代价记在这里：② 取 4 后，键盘 :focus-visible 环离卡片边只剩 2px ——
+     实机上若觉得挤，改 outline-offset 往内画，**不要动间距**。 */
   gap: 8px;
-  padding: 11px 10px 11px 16px; /* V2：9px 10px 9px 13px → 11px 10px 11px 16px */
+  padding: 11px 10px 4px 16px;
   background: var(--plate);
   border: 1px solid var(--line-strong); /* 主输入框：唯一允许用结构线的控件 */
   border-radius: var(--r-lg);
@@ -393,7 +401,9 @@
    （DSH 那行还有 tok/s 与缓存命中率——我们没有这两个数据，不编。） */
 .statusBar {
   width: var(--col); /* 与输入框同列 */
-  margin: 9px auto 0;
+  /* 2026-11-18 定案：卡片下沿 → 这行读数 = 6px（原 9）。
+     贴着输入台的三个间距一并改过，口径见 .consoleFrame 的注释。 */
+  margin: 6px auto 0;
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -408,10 +418,6 @@
 .statusStats {
   color: var(--ink-mid);
   white-space: nowrap;
-}
-
-.statusHint {
-  text-align: right;
 }
 
 /* ---- 错误横幅 ---- */

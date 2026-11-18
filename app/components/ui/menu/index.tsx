@@ -26,8 +26,12 @@ import styles from "./menu.module.css";
 
 export type MenuItem = {
   label: string;
+  /** 第二行说明（12px 淡墨）：选项名本身是黑话时，一句话说清「它是干什么的」 */
+  description?: string;
   /** 右侧小字说明（如「不可恢复」），可有可无 */
   hint?: string;
+  /** 单选菜单（`selection="single"`）里的选中态：右侧给 ✓ */
+  checked?: boolean;
   /** 危险操作：红色，如删除/清空 */
   danger?: boolean;
   disabled?: boolean;
@@ -45,18 +49,43 @@ type MenuProps = {
    *   side  —— 贴触发器右侧水平展开（窄侧栏里不盖住列表信息）
    */
   align?: "start" | "end" | "side";
+  /**
+   * 面板朝哪边开：
+   *   down —— 触发器下方（默认）
+   *   up   —— 触发器上方。**屏幕底部的触发器只能往上开**（输入台工具栏就是这种），
+   *           否则面板会被视口切掉。
+   */
+  placement?: "down" | "up";
+  /**
+   * 语义：
+   *   none   —— 一组动作（默认）
+   *   single —— 从 N 个里选一个：项用 `menuitemradio` + `aria-checked`，选中项右侧 ✓
+   */
+  selection?: "none" | "single";
   /** 触发器内容：默认「⋯」；传文字可做文字触发器 */
   children?: ReactNode;
   /** 包在触发器外的定位类（如绝对定位到面板右上角） */
   className?: string;
+  /**
+   * 换掉默认触发器外观（默认是 34px 的「⋯」幽灵按钮）。
+   * 传了它就**不再套** `styles.trigger` —— 形状与命中区由调用方负责，
+   * 原语只管开合、焦点与 aria。
+   */
+  triggerClassName?: string;
+  /** 面板的额外形状（宽度等）。定位、投影、圆角仍由原语负责。 */
+  panelClassName?: string;
 };
 
 export function Menu({
   label,
   items,
   align = "start",
+  placement = "down",
+  selection = "none",
   children = "⋯",
   className,
+  triggerClassName,
+  panelClassName,
 }: MenuProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -173,7 +202,7 @@ export function Menu({
       <button
         ref={triggerRef}
         type="button"
-        className={styles.trigger}
+        className={triggerClassName ?? styles.trigger}
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -186,8 +215,9 @@ export function Menu({
           没有坐标就渲染会闪一帧错位） */}
       {open && (align !== "side" || sideRect) && (
         <div
-          className={styles.panel}
+          className={`${styles.panel}${panelClassName ? ` ${panelClassName}` : ""}`}
           data-align={align}
+          data-placement={placement}
           style={
             align === "side" && sideRect
               ? { position: "fixed", left: sideRect.left, top: sideRect.top }
@@ -204,14 +234,27 @@ export function Menu({
                 itemRefs.current[i] = el;
               }}
               type="button"
-              role="menuitem"
+              role={selection === "single" ? "menuitemradio" : "menuitem"}
+              aria-checked={
+                selection === "single" ? Boolean(item.checked) : undefined
+              }
               className={`${styles.item}${item.danger ? ` ${styles.danger}` : ""}`}
               disabled={item.disabled}
               onClick={() => pick(item)}
             >
-              <span className={styles.itemLabel}>{item.label}</span>
+              <span className={styles.itemText}>
+                <span className={styles.itemLabel}>{item.label}</span>
+                {item.description && (
+                  <span className={styles.itemDesc}>{item.description}</span>
+                )}
+              </span>
               {item.hint && (
                 <span className={styles.itemHint}>{item.hint}</span>
+              )}
+              {selection === "single" && (
+                <span className={styles.itemCheck} aria-hidden="true">
+                  {item.checked ? "✓" : ""}
+                </span>
               )}
             </button>
           ))}

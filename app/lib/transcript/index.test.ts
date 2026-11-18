@@ -8,7 +8,12 @@ import type {
   ToolResultMessage,
   UserMessage,
 } from "@/lib/types";
-import { buildTranscript, countByCategory, toolCategoryOf } from "./index";
+import {
+  buildTranscript,
+  countByCategory,
+  shouldCollapseProcess,
+  toolCategoryOf,
+} from "./index";
 
 // 夹具照真机数据的形状写（见 doc/plan/chat-surface-dsh-alignment.md 4.13 的实测：
 // 一个回合 = 用户 + 若干「助手带 toolCall」+ 同样多的 toolResult + 最后一条助手正文）。
@@ -266,5 +271,37 @@ describe("真实形状：16 条记录折成 1 个回合", () => {
     expect(countByCategory(turns[0].steps)).toEqual([
       { category: "read", count: 9 },
     ]);
+  });
+});
+
+describe("shouldCollapseProcess：什么时候默认折起来", () => {
+  // 一次「读一个文件再回答」的最小回合 —— 四条用例只改一个变量，读 diff 时看得清改了什么
+  const oneTurn = (stopReason: AssistantMessage["stopReason"] = "stop") =>
+    buildTranscript([
+      user("问"),
+      assistant([call("c1", "read_file", { path: "a.md" })]),
+      result("c1", "read_file", "内容"),
+      assistant([text("答")], stopReason),
+    ])[0];
+
+  it("有回答 + ok + 不在跑 ⇒ 折", () => {
+    expect(shouldCollapseProcess(oneTurn(), false)).toBe(true);
+  });
+
+  it("正在跑 ⇒ 展开（还在长的时候折起来，等于把正在发生的事藏起来）", () => {
+    expect(shouldCollapseProcess(oneTurn(), true)).toBe(false);
+  });
+
+  it("只有工具、没有回答 ⇒ 展开（没回答本身就是信息）", () => {
+    const turn = buildTranscript([
+      user("问"),
+      assistant([call("c1", "read_file", { path: "a.md" })]),
+      result("c1", "read_file", "内容"),
+    ])[0];
+    expect(shouldCollapseProcess(turn, false)).toBe(false);
+  });
+
+  it("失败（stopReason=error）⇒ 展开，哪怕有半截回答", () => {
+    expect(shouldCollapseProcess(oneTurn("error"), false)).toBe(false);
   });
 });

@@ -39,17 +39,24 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
+  /* 整行是按钮：向外各借 6px 做出悬停底，又不把文字推离阅读列的左沿 */
+  width: calc(100% + 12px);
   height: 33px;
-  padding: 0 0 8px;
+  margin: 0 -6px;
+  padding: 0 6px;
   border: 0;
-  border-bottom: 0.5px solid var(--line);
+  border-radius: 6px;
   background: none;
   font-family: var(--font-sans);
-  font-size: 13px;
-  color: var(--ink-mid);
+  /* 2026-11-18：13 → 12、--ink-mid → --ink-faint。
+     判据：它是**回执**不是**依据** —— 你不需要读它就能决定下一步。 */
+  font-size: 12px;
+  color: var(--ink-faint);
   text-align: left;
   cursor: pointer;
+  transition:
+    color 0.12s,
+    background-color 0.12s;
 }
 
 .processHead:disabled {
@@ -58,6 +65,22 @@
 
 .processHead:hover:not(:disabled) {
   color: var(--ink);
+  background: var(--feed-hover);
+}
+
+/* 行首箭头：12px 的槽位**一直占着**（进行中时留空），
+   这样跑完那一刻文字不会往左跳 20px。展开时整个槽位转 180°。 */
+.processLead {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  display: grid;
+  place-items: center;
+  transition: transform 0.16s;
+}
+
+.process[data-open="true"] .processLead {
+  transform: rotate(180deg);
 }
 
 .processLabel {
@@ -75,15 +98,8 @@
   color: var(--ink-faint);
 }
 
-.processChevron {
-  flex: none;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--ink-faint);
-}
-
 .processBody {
-  padding: 8px 0 2px;
+  padding: 6px 0 2px;
 }
 
 /* ---- 一条工具：24px 行，点开才给入参/出参 ---- */
@@ -253,4 +269,91 @@
   /* 列窄了（720）以后，带宽表的回答会从两侧被裁掉：让回答区自己横向滚动，
      表格本身不动（居中溢出 → 改成"从左排、可滑"）。2026-11-18 实测截图发现。 */
   overflow-x: auto;
+}
+
+/* ---- 回答底部的动作行（C61）----
+   一条判据：对**已经生成的内容**做事 ⇒ 悬停才现（不该占读者的注意力）。
+   尺寸抄 pi-web `MessageView.tsx:512-553`；命中区按本项目 `--hit` 判据撑到 32。 */
+.answerRow {
+  display: flex;
+  justify-content: flex-end;
+  gap: 3px;
+  margin-top: 3px;
+  min-height: 22px;
+}
+
+.answerActs {
+  display: flex;
+  gap: 3px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+}
+
+/* 悬停整条回合才现；被打断 / 失败的回合常驻。
+   `:focus-within` 那条不是装饰 —— 键盘 Tab 会走到"眼里看不见"的按钮上，
+   焦点一进来就得让它现身。 */
+.turn:hover .answerActs,
+.answerActs:focus-within,
+.answerRow[data-persistent] .answerActs {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.act {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--ink-faint);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color 0.12s,
+    background-color 0.12s;
+}
+
+/* 视觉 22、命中 32：向外扩 5px 的透明层。
+   ⚠️ 目的不是"看着小"，是"点得到"——可点性下限是 --hit: 34，22px 的按钮不能真的只有 22。 */
+.act::before {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: 8px;
+}
+
+.act:hover {
+  color: var(--ink);
+  background: var(--feed-hover);
+}
+
+.act:focus-visible {
+  outline: 2px solid var(--pen-user);
+  outline-offset: 3px;
+}
+
+.act svg {
+  width: 11px;
+  height: 11px;
+  flex: none;
+}
+
+.act[data-copied="true"] {
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .answerActs,
+  .act,
+  .processHead,
+  .processLead {
+    transition: none;
+  }
 }

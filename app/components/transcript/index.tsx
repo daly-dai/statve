@@ -15,6 +15,7 @@ import { Markdown } from "../../markdown";
 import { SkillCard } from "../skill-card";
 import {
   countByCategory,
+  shouldCollapseProcess,
   type ProcessStep,
   type ToolCategory,
   type TranscriptTurn,
@@ -204,28 +205,48 @@ function ProcessGroup({
   collapsedByDefault,
   toolOutputs,
 }: ProcessGroupProps) {
-  const [open, setOpen] = useState(!collapsedByDefault);
+  // 用户手动开/关过就以他为准；没表态时**跟着判据走** —— 所以跑完会自己折起来。
+  // ⚠️ 不能写成 useState(!collapsedByDefault)：初值只在挂载时算一次，而这一轮是
+  // "边跑边长"的（挂载时还没回答 ⇒ false），跑完之后判据翻成 true 也没人再读一次，
+  // 于是"跑完不收、刷新才收"。派生值就没有这个坑。
+  const [manual, setManual] = useState<boolean | null>(null);
   const { brief, full } = processSummary(steps);
   const head = streaming ? liveHead(steps) : brief;
   const canCollapse = !streaming && steps.length > 0;
+  const open = canCollapse ? (manual ?? !collapsedByDefault) : true;
 
   return (
-    <div className={styles.process} data-open={open || !canCollapse}>
+    <div className={styles.process} data-open={open}>
       <button
         type="button"
         className={styles.processHead}
-        onClick={() => canCollapse && setOpen(!open)}
+        onClick={() => canCollapse && setManual(!open)}
         aria-expanded={canCollapse ? open : undefined}
         title={full}
         disabled={!canCollapse}
       >
+        {/* 行首箭头：**它**才是"这行能展开"的信号（下划线是分隔，两件事别挤在一起）。
+            进行中时这个槽位留空 —— 不是省事，是为了跑完那一刻文字不往左跳 20px。 */}
+        <span className={styles.processLead} aria-hidden="true">
+          {canCollapse && (
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 12 12"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M2.5 4.5 6 8 9.5 4.5" />
+            </svg>
+          )}
+        </span>
         <span className={styles.processLabel}>{head}</span>
         <span className={styles.processMeta}>{steps.length} 步</span>
-        {canCollapse && (
-          <span className={styles.processChevron}>{open ? "⌃" : "⌄"}</span>
-        )}
       </button>
-      {(open || !canCollapse) && steps.length > 0 && (
+      {open && steps.length > 0 && (
         <div className={styles.processBody}>
           {steps.map((step, i) => (
             <StepView
@@ -236,6 +257,65 @@ function ProcessGroup({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/** 回答底部的动作行（C61）：对**已经生成的内容**做事 —— 悬停才现，不占读者的注意力。
+ *  尺寸抄 pi-web（`MessageView.tsx:512-553`）：22px 高 / 11px 字 / ✓ 反馈 1.5s；但命中区
+ *  按本项目 `--hit: 34px` 的判据用 ::before 撑到 32（视觉 22，点得到 32）。 */
+function AnswerActions({
+  answer,
+  persistent,
+}: {
+  answer: string;
+  /** 被打断 / 失败的回合：常驻（那时人更可能要把已有内容拿走） */
+  persistent: boolean;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    try {
+      // 复制的是 markdown 原文（不是渲染后的文字）：粘贴回编辑器还能直接用
+      await navigator.clipboard.writeText(answer);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* 剪贴板不可用就算了：内容在上面，手选也能复制 */
+    }
+  };
+
+  return (
+    <div className={styles.answerRow} data-persistent={persistent || undefined}>
+      <div className={styles.answerActs}>
+        <button
+          type="button"
+          className={styles.act}
+          onClick={copy}
+          data-copied={copied || undefined}
+          aria-label={copied ? "已复制" : "复制这条回答"}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            {copied ? (
+              <polyline points="20 6 9 17 4 12" />
+            ) : (
+              <>
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </>
+            )}
+          </svg>
+          <span>{copied ? "已复制" : "复制"}</span>
+        </button>
+      </div>
     </div>
   );
 }
@@ -253,8 +333,8 @@ export function Transcript({ turns, streaming, toolOutputs }: TranscriptProps) {
       {turns.map((turn, index) => {
         const isLast = index === turns.length - 1;
         const live = streaming && isLast;
-        // 有最终回答就折；没回答 / 进行中 / 失败 / 被打断 ⇒ 展开
-        const collapsed = turn.answer !== "" && turn.status === "ok" && !live;
+        // 判据住在 app/lib/transcript（纯函数，可单测）：有回答 + ok + 不在跑 ⇒ 折
+        const collapsed = shouldCollapseProcess(turn, live);
         return (
           <section
             key={turn.index}
@@ -273,9 +353,15 @@ export function Transcript({ turns, streaming, toolOutputs }: TranscriptProps) {
               toolOutputs={live ? toolOutputs : undefined}
             />
             {turn.answer !== "" && (
-              <div className={styles.answer}>
-                <Markdown>{turn.answer}</Markdown>
-              </div>
+              <>
+                <div className={styles.answer}>
+                  <Markdown>{turn.answer}</Markdown>
+                </div>
+                <AnswerActions
+                  answer={turn.answer}
+                  persistent={turn.status !== "ok"}
+                />
+              </>
             )}
             {!live &&
               turn.answer === "" &&
