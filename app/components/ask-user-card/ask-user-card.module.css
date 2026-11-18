@@ -9,8 +9,8 @@
    ============================================================ */
 
 .card {
-  width: 100%;
-  max-width: var(--sheet-max); /* 与输入框同列宽（2026-09-16 改为跟壳走） */
+  width: var(--col); /* 与输入框同一条阅读列（C57） */
+  max-width: none;
   margin: 0 auto;
   padding: 14px 16px 16px; /* V2：10px 12px 12px → 14px 16px 16px */
   background: var(--plate);

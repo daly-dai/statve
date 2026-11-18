@@ -33,6 +33,12 @@
   min-width: 0;
   min-height: 0;
   background: var(--paper);
+  /* 右栏的「阅读列宽」（2026-11-18 用户定：60% + 最低 720px + 居中）
+     = 右栏宽度的 60%，但不少于 720px；窗口窄到放不下时退化成"右栏宽 − 64px"，
+     永远给两侧留 32px、永不横向溢出。
+     ⚠️ 百分比按**使用者自己的包含块**算，所以列宽元素的父级不能有左右内边距
+     （见 .transcript / .console / .todoBar：都改成 0 了），否则 60% 会缩成 63.4%。 */
+  --col: min(calc(100% - 64px), max(720px, 60%));
 }
 
 /* ---- 顶部 tab（A3 + 2026-11-17 收成 32px）：1fr 槽位按 tab 换内容，
@@ -93,7 +99,9 @@
 .hero {
   display: flex;
   justify-content: center;
-  padding: 0 32px 18px;
+  width: var(--col); /* 与输入框卡片同列 */
+  margin: 0 auto;
+  padding: 0 0 18px;
 }
 
 .brand {
@@ -148,7 +156,11 @@
 .transcript {
   overflow-y: auto;
   min-height: 0;
-  padding: 32px 32px 6px; /* V2：26px 26px 4px → 32px 32px 6px */
+  /* 左右不留内边距：列宽由 .reel 用 --col 自己算（见 .stage 的注释）。
+     ⚠️ 滚动条两侧都预留（both-edges）：否则滚动条一出现，内容盒窄 9px，
+     转录稿列会比输入框列**左移 4.5px**——两条列本该同轴（2026-11-18 实测）。 */
+  padding: 32px 0 6px;
+  scrollbar-gutter: stable both-edges;
   scrollbar-width: thin;
   scrollbar-color: var(--line) transparent;
 }
@@ -165,14 +177,15 @@
 }
 
 .reel {
-  max-width: var(--sheet-max); /* 2026-09-16：880 固定列 → 跟着外壳走 */
+  /* 阅读列：右栏宽的 60%，最低 720px，居中（见 .stage 的 --col 注释） */
+  width: var(--col);
   margin: 0 auto;
 }
 
 /* ---- 上下文压缩提示（B2） ---- */
-/* 后端在压缩（调模型生成摘要）时给用户的反馈条，跟消息同列宽，视觉轻量 */
+/* 后端在压缩（调模型生成摘要）时给用户的反馈条，跟消息同列宽（它已经在 .reel 里了，
+   所以 100% 即列宽，不要再套一层 --col） */
 .compacting {
-  max-width: var(--sheet-max); /* 2026-09-16：跟壳走，与消息同列 */
   margin: 10px auto 0;
   display: flex;
   align-items: center;
@@ -187,9 +200,9 @@
 }
 
 /* ---- 任务面板容器（Phase 5） ---- */
-/* 与指令台同列：外层左右 padding，面板内部 880 居中，与输入框 x 范围对齐 */
+/* 与指令台同列：容器不留左右内边距，面板自己用 --col 收进阅读列 */
 .todoBar {
-  padding: 0 32px; /* V2：26 → 32 */
+  padding: 0;
 }
 
 /* ---- 审批模式切换条（B1-②） ---- */
@@ -210,7 +223,8 @@
    "模型需要你"时输入框隐藏，卡片占据输入框的位置（askUser 同款）。
    与 todoBar/console 同列：外层 32px padding，卡片内部 880 居中。 */
 .decisionBar {
-  padding: 0 32px 8px; /* V2：0 26px 6px → 0 32px 8px */
+  /* 卡片自己用 --col 收进阅读列（2026-11-18），容器不留左右内边距 */
+  padding: 0 0 8px;
 }
 
 /* B17④：决策区宿主 = 卡片（文档流占位）与常驻输入框的定位容器。
@@ -233,7 +247,8 @@
 
 /* ---- 指令台（输入） ---- */
 .console {
-  padding: 8px 32px 20px; /* V2：6px 26px 18px → 8px 32px 20px */
+  /* 左右不留内边距：卡片自己用 --col 收进阅读列（见 .stage 注释） */
+  padding: 8px 0 20px;
   /* 不加分隔线：指令台与内容面靠留白分开（第五次调整撤掉了这里一条 2px） */
 }
 
@@ -241,7 +256,7 @@
    按钮跟着眼睛走；现在按钮落在工具栏右端，和审批档位同一行。 */
 .consoleFrame {
   position: relative; /* C13：命令补全面板 absolute 定位锚点（贴输入框上方） */
-  max-width: var(--sheet-max); /* 2026-09-16：跟壳走 */
+  width: var(--col); /* 与转录稿同一条阅读列 */
   margin: 0 auto;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -373,7 +388,7 @@
    没地方显示了。参考 DSH 的输入框底栏放这里：左读数、右提示，一行两栏。
    （DSH 那行还有 tok/s 与缓存命中率——我们没有这两个数据，不编。） */
 .statusBar {
-  max-width: var(--sheet-max); /* 2026-09-16：跟壳走 */
+  width: var(--col); /* 与输入框同列 */
   margin: 9px auto 0;
   display: flex;
   align-items: baseline;
@@ -397,7 +412,7 @@
 
 /* ---- 错误横幅 ---- */
 .alarm {
-  max-width: var(--sheet-max); /* 2026-09-16：跟壳走 */
+  width: var(--col); /* 与阅读列同宽 */
   margin: 0 auto 12px;
   display: flex;
   gap: 12px;

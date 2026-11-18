@@ -9,9 +9,9 @@
    ============================================================ */
 
 .approvalCard {
-  /* 与提问卡同列宽、居中，钉在输入框位置，不再随消息流滚动 */
-  width: 100%;
-  max-width: var(--sheet-max);
+  /* 与提问卡/输入框同一条阅读列（C57：右栏宽 60%，最低 720px，居中） */
+  width: var(--col);
+  max-width: none;
   margin: 0 auto;
   padding: 14px 16px 12px; /* V2：12px 14px 10px → 14px 16px 12px */
   background: var(--plate);
