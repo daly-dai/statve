@@ -47,7 +47,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import styles from "./page.module.css";
 import { Nameplate } from "./components/nameplate";
-import { MessageRow } from "./components/message-row";
+import { Transcript } from "./components/transcript";
+import { buildTranscript } from "./lib/transcript";
 import { TraceViewer } from "./components/trace-viewer";
 import { SessionList } from "./components/session-list";
 import { ApprovalDialog } from "./components/approval-dialog";
@@ -221,6 +222,9 @@ export default function Home() {
   //   滚动容器，自己用同一个 hook，页面不必再管。）
   const followTranscript = useStickyScroll(transcriptRef);
 
+  // 消息 → 回合（纯函数，逐帧重算；messages 引用没变就不重算）
+  const turns = useMemo(() => buildTranscript(messages), [messages]);
+
   useEffect(() => {
     if (followTranscript) scrollToEnd(transcriptRef.current);
   }, [messages, followTranscript]);
@@ -370,30 +374,14 @@ export default function Home() {
           {tab === "chat" ? (
             <div className={styles.transcript} ref={transcriptRef}>
               <div className={styles.reel}>
-                {/* 逐条渲染。attached：工具结果行从属于上一条消息（视觉上缩进连接）
-                    live：最后一条且正在加载 → 流式增长动画
-                    ⚠️ 2026-11-17：空态那套起手式引导（<Overture>）整块删了 ——
-                    "多轮对话 · 会话记忆已开启 / 给它一个目标…" 和四个例句按钮
-                    都是早期教学阶段的脚手架，用户明确不再需要。 */}
-                {messages.map((msg, i) => {
-                  // B17③：toolOutputs 只下发给"含 toolCall 的 assistant 行"。
-                  // 为什么不能全量传：toolOutputs 是每帧新对象，MessageRow 又
-                  // 是 memo 组件——若每行都收新引用，memo 浅比较全部失效，
-                  // 流式就退回全树重渲。只有渲染 toolCall 的行才消费它
-                  // （bash 实时输出挂在 ToolCallLine 下），其余行传 undefined。
-                  const needsLiveOutput =
-                    msg.role === "assistant" &&
-                    msg.content.some((block) => block.type === "toolCall");
-                  return (
-                    <MessageRow
-                      key={`${msg.role}-${msg.timestamp}-${i}`}
-                      message={msg}
-                      attached={i > 0 && msg.role === "toolResult"}
-                      live={loading && i === messages.length - 1}
-                      toolOutputs={needsLiveOutput ? toolOutputs : undefined}
-                    />
-                  );
-                })}
+                {/* C57：转录稿按**回合**渲染（一次对话 = 一个回合），不再一条消息一行。
+                    折叠规则、工具行、最终回答的切法都在 <Transcript> / app/lib/transcript 里；
+                    页面只负责两件事：把消息折成回合（纯函数）、告诉它这一轮还在不在跑。 */}
+                <Transcript
+                  turns={turns}
+                  streaming={loading}
+                  toolOutputs={toolOutputs}
+                />
                 {/* 上下文压缩进行中（B2）：后端在调模型生成摘要，给用户明确反馈，
                   而不是让 transcript 停在原地像卡住 */}
                 {compacting && (

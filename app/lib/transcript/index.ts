@@ -96,7 +96,13 @@ export type ProcessStep =
   /** 中途叙述：组内按正文字号渲染，不压成 24px 行（罕见，但不能丢） */
   | { kind: "text"; text: string }
   /** 非对话记录：上下文压缩 / 技能注入。一行，点开看细节 */
-  | { kind: "note"; note: "compaction" | "skill"; label: string; text: string };
+  | {
+      kind: "note";
+      note: "compaction" | "skill";
+      label: string;
+      name?: string;
+      text: string;
+    };
 
 export type TranscriptTurn = {
   index: number;
@@ -263,6 +269,7 @@ function foldTurn(slice: TurnSlice, index: number): TranscriptTurn {
         kind: "note",
         note: "skill",
         label: `已加载技能 ${message.source?.name ?? ""}`.trim(),
+        name: message.source?.name,
         text: textOf(message),
       });
       return;
