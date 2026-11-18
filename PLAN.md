@@ -272,7 +272,7 @@
 |---|---|---|---|---|---|
 | C17 | **包装与开源**（README / 录屏 GIF / 在线 demo 评估 / 开源准备）—— **2026-09-14 定：快速迭代期先不做** | 自身经验 | `doc/plan/c17-packaging-opensource.md`（材料已归位 · 未定案） | — | 未开始 |
 | C29 | **整体评价体系**：先调研现成的 → 评价维度 → 评一遍 statve 自己 → 固化成 skill + 收尾检查项。排期 = 大功能全完成之后 | 首要依据 `Agent-Harness-Survey-ZH-main` §8 + 6 个候选（一手） | `doc/plan/c29-evaluation-system.md`（材料已归位 · **开工先读 `doc/研究/agent评价标准-调研.md`**） | — | 未开始 |
-| C30 | **改名：`Teaching Agent` / `agent-learn` → `statve`**（2026-09-16 用户拍板；「观测台」一并清理） | `workspace/agent命名-欧洲小语种候选.md` §5.5（占用矩阵，RDAP 实测）+ §2.1（词义） | `doc/plan/rename-statve.md`（材料已归位 · 未定案） | ✅ 代码 / UI / 文档全落地（`package.json` name · `app/layout.tsx` 标题 · `nameplate` wordmark · 提示词自称 · 护栏消息 · User-Agent）；旧三串 0 命中（2026-09-18 复核） | 已交付 |
+| C30 | **改名：`Teaching Agent` / `agent-learn` → `statve`**（2026-09-16 用户拍板；「观测台」一并清理） | `workspace/agent命名-欧洲小语种候选.md` §5.5（占用矩阵，RDAP 实测）+ §2.1（词义） | `doc/plan/rename-statve.md`（补记 3：仓库名已改） | ✅ 代码 / UI / 文档全落地（`package.json` name · `app/layout.tsx` 标题 · `nameplate` wordmark · 提示词自称 · 护栏消息 · User-Agent）；旧三串 0 命中（2026-09-18 复核） | 已交付 |
 | C38 | **沟通协议：把「讲明白」变成有检查方式的规则**（8 条病 + 4 个候选方向 · 2026-09-17 用户提出；原话 / 触发场景 / 检查方式全在详案里） | 用户 2026-09-17 原话 + C8 三天的真实样本（同一个决定被二次解释；a1/a2 两条 bug 是功能自己引发的返工） | `doc/plan/c38-communication-protocol.md`（材料已归位 · 未定案） | —（定案后再写；**必须含"检查方式"**） | 未开始 |
 
 | C41 | **仓库是 public、git 历史里有旧内容 —— 怎么处置**（2026-09-18 从退役的 `会话检查点.md` 收编；**已决但没落地**） | 2026-09-15 会话实测；关联 **C17** 的「敏感信息扫描」这条验收**从来没做过** | `doc/plan/c41-public-repo-history.md`（材料已归位 · 未定案） | 用户拍板三选一（转私有 / rewrite / 明确承担不改）+ 执行完复验 | 未开始 |

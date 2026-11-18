@@ -108,7 +108,7 @@
 1. 详案 + `PLAN.md` 排期表（本文件）
 2. 代码改名（13 文件）+ `tsc` + `pnpm test`
 3. 文档层批量替换（**单独一个 commit**）
-4. （在本会话之外）目录名 / GitHub 仓库名 —— ⏸ **已明确推迟**：用户 2026-09-16 原话「**仓库改名这个等我把手上的大功能做完之后再说 现在没精力搞**」。**在此之前不要再问、也不要顺手做**；等大功能完成后作为独立一步执行（改完本地记得 `git remote set-url origin git@github.com:daly-dai/statve.git`，且**本地目录名必须在 DSH 会话之外改**）。⚠️ 这条不改，"文档叫 `statve`、GitHub 仓库叫 `agent-learn`"的不一致会一直在（仓库是 public）。
+4. （在本会话之外）目录名 / GitHub 仓库名 —— ⏸ **已明确推迟**：用户 2026-09-16 原话「**仓库改名这个等我把手上的大功能做完之后再说 现在没精力搞**」。**在此之前不要再问、也不要顺手做**；等大功能完成后作为独立一步执行（改完本地记得 `git remote set-url origin git@github.com:daly-dai/statve.git`，且**本地目录名必须在 DSH 会话之外改**）。⚠️ 这条不改，"文档叫 `statve`、GitHub 仓库叫 `agent-learn`"的不一致会一直在（仓库是 public）。**→ 2026-11-18 已执行（GitHub 那一半），见补记 3。**
 
 **收尾（`AGENTS.md` 第 10 条）**：更新本详案 → 在 `doc/iteration/i<n>.md` 里写终态 → **展示改动清单等用户确认再 commit**。
 
@@ -169,3 +169,40 @@
 **C30 · 依据**：`workspace/agent命名-欧洲小语种候选.md` §5.5（占用矩阵，RDAP 实测）+ §2.1（词义）
 
 **C30 · 状态格原文（整格照搬）**：⏳ 进行中（代码 ✅ `aadc389` / 文档层 ✅ `32ba052` / 目录名·仓库名 ⏳）
+
+---
+
+## 九、补记 3（2026-11-18）：GitHub 仓库名 `agent-learn` → `statve`（真落地了）
+
+**触发**：用户「今晚搞点杂活。咱们项目要改成 statve，现在在 github 上就叫 agent-learn … 最好能保留所有的提交记录」。§六 第 4 条那条 ⏸（2026-09-16「等我把手上的大功能做完之后再说」）到此解除 —— 大功能 C57 同日晚已合进 `main` 并打了 `v0.3.0`。
+
+**做法：GitHub 的「改名」，不是「新建仓库再推上去」。** 两条路看着都得到"一个叫 statve 的仓库"，但只有前者不换仓库身份：
+
+| | 仓库 ID | 提交历史 | tag / issue / star |
+|---|---|---|---|
+| **Settings → Rename**（本项走的路） | **不变** | **原样保留** | 原样 |
+| 新建 `statve` 再 push 上去 | 换成一个新的 | 变成**另一条**历史 | 全留在旧仓库 |
+
+**机制（为什么"改名不丢历史"）**：GitHub 给每个仓库分配一个**永久不变的仓库 ID**，`daly-dai/agent-learn` 只是它**当前的名字** —— 名字是别名，commit 挂的是 ID。所以这件事**不需要** `force push`（强制推送，用本地历史覆盖远端，危险动作）、**不需要** `git filter-repo`（重写历史的工具）、**不需要**重新 `init`。反过来看更要紧：**这三样一个都别碰** —— 它们才是真正会动提交记录的东西，而"改名"根本不在那个清单里。
+
+**实测（2026-11-18 19:0x，GitHub API 直查 + 本地 git）**：
+
+| 查什么 | 结果 |
+|---|---|
+| `api.github.com/repos/daly-dai/statve` | **200**，`full_name=statve` |
+| `api.github.com/repos/daly-dai/agent-learn` | 200，但 `full_name=**statve**` ⇒ 这就是 **301 重定向**（服务器回"这个地址搬了"，客户端自动跟到新地址），两边 `pushed_at` 都是 `2026-11-18 10:53` ⇒ 确实是**同一个**仓库 |
+| 改名前 `daly-dai/statve` | 404（名字空着，能占）—— 与补记 1 那次核查一致 |
+| `git remote set-url` 后 `git ls-remote origin` | **exit 0**，`HEAD = a0a4b3c` = 本地 `main` 的合并提交 |
+| 改名前后本地 / 远端 | 都是 `a0a4b3c`（`git rev-list --left-right --count` = `0 0`），工作区 0 改动 |
+| 本地提交总数 | **256** |
+
+**我这边只动了 `git remote`**：`origin` 从 `git@github.com:daly-dai/agent-learn.git` 改成 `…/statve.git`（`.git/config` 里再没有别的旧地址，无第二个 remote、无 `insteadOf` 规则）。**代码一行没动** —— `package.json` 的 name、页头、提示词、`README.md` 的标题早在 C30 就都是 `statve` 了，缺的只有**门牌**。
+
+**用户当场拍的两件**：① 本地目录名**一起改**（由用户在本 DSH 会话之外执行 —— 本会话 cwd 就是那个目录，在会话里重命名等于抽掉脚下的地板）② 旧名 `agent-learn` **不锁**（不建空仓库占位）。
+- **不锁的判据**（这是知情接受，不是没看见）：目前没有外部引用指向旧地址 —— `README.md` 里没有仓库链接、`web_fetch` 的 UA 里的 URL 早在补记 1 就删了。代价是**重定向会被抢注顶掉**：谁在 `daly-dai` 下建一个叫 `agent-learn` 的仓库，旧链接立刻指向它。
+
+**本地目录改名要连带处理的（实测，不是猜）**：`.next`（Next 构建缓存）与 `tsconfig.tsbuildinfo`（TS 增量缓存）里都有**旧绝对路径** → 删掉重建；`node_modules/.modules.yaml` 的 `virtualStoreDir` 也记着旧路径，但 `.pnpm` 里的软链是**相对**的 ⇒ **不跑 `pnpm install` 也能编译**，真报 deps 状态不对再 `pnpm install --frozen-lockfile`（不升版本、不动 lockfile）。好消息：`<数据根>/workspaces.json` 里现存的两个工作空间都在 `E:\codeRead\` 下，**不受这次目录改名影响**。
+
+**还开着的两件**（都不是本补记能关掉的）：
+1. **UA 里的仓库 URL 要不要补回**（补记 1 的尾巴）：当时的判据是"指向不存在的仓库等于撒谎，等真改完名再决定"。现在地址是真的了 —— 但补不补仍是**独立的一个决定**，不由改名自动解决。
+2. **`C41`**（仓库是 public + 历史里有个人规划文档）：改名**不解决**它。改名只换了门牌，历史里的东西一件没少。
