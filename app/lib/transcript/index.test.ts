@@ -12,6 +12,7 @@ import {
   buildTranscript,
   countByCategory,
   formatElapsed,
+  reasoningSummary,
   toolCategoryOf,
 } from "./index";
 
@@ -319,5 +320,59 @@ describe("formatElapsed：时长只有一个写法（中文分秒）", () => {
     expect(formatElapsed(120_000)).toBe("2 分"); // 整分不写「2 分 0 秒」
     expect(formatElapsed(3_600_000)).toBe("1 小时");
     expect(formatElapsed(3_735_000)).toBe("1 小时 2 分");
+  });
+});
+
+// ---------- C58：思考块在数据层的去处 ----------
+
+describe("思考块（C58 P1）", () => {
+  /** 一条「思考 + 正文」的助手消息 */
+  function withReasoning(): AssistantMessage {
+    return {
+      role: "assistant",
+      content: [{ type: "reasoning", text: "先想了一下" }, text("答案")],
+      stopReason: "stop",
+      usage: { input: 1, output: 1, totalTokens: 2 },
+      timestamp: 200,
+    };
+  }
+
+  it("进过程组，但**不是**工具步 —— 旧代码把它当 toolCall（args: undefined），崩在组件里", () => {
+    const turn = buildTranscript([user("问"), withReasoning()])[0];
+
+    expect(turn.steps.some((step) => step.kind === "tool")).toBe(false);
+    expect(turn.steps[0]).toMatchObject({
+      kind: "reasoning",
+      text: "先想了一下",
+    });
+  });
+
+  it("思考算「非文本块」，所以它之后的正文才是回答", () => {
+    const turn = buildTranscript([user("问"), withReasoning()])[0];
+
+    expect(turn.answer).toBe("答案");
+  });
+});
+
+describe("思考摘要（C58 P2）", () => {
+  it("结束后取全文首行", () => {
+    expect(reasoningSummary("先看目录\n再看文件", false)).toBe("先看目录");
+  });
+
+  it("运行中取「最近一个已完成段落」的首行（半截段落不算）", () => {
+    const streaming = "第一段第一行\n第一段第二行\n\n第二段还没写完";
+    expect(reasoningSummary(streaming, true)).toBe("第一段第一行");
+  });
+
+  it("运行中还没有任何完成段落时不给摘要", () => {
+    expect(reasoningSummary("只有一行还没换行", true)).toBe("");
+  });
+
+  it("去掉 ** 标记（24px 是纯文本行，不是 Markdown）", () => {
+    expect(reasoningSummary("**重点**：看这里", false)).toBe("重点：看这里");
+  });
+
+  it("空思考返回空串（组件据此整行不渲染）", () => {
+    expect(reasoningSummary("   ", false)).toBe("");
   });
 });

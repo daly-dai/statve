@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { JsonlSessionStore, summarizeEntries } from ".";
+import { JsonlSessionStore, estimateTokens, summarizeEntries } from ".";
 import { createAssistantMessage, createUserMessage, text } from "../../message";
 import type { AgentMessage, SessionEntry } from "../../types";
 
@@ -400,5 +400,42 @@ describe("线性日志 —— 新写的条目不再带 parentId", () => {
     } finally {
       cleanup();
     }
+  });
+});
+
+// ---------- C58：思考在两种文本口径里的去处 ----------
+
+describe("思考 —— 估算算进去、摘要排除掉（C58 P1）", () => {
+  /** 一条"思考 + 正文"的助手消息 */
+  function messageWithReasoning(): AgentMessage {
+    return {
+      role: "assistant",
+      content: [{ type: "reasoning", text: "想了很多很多" }, text("答案")],
+      stopReason: "stop",
+      usage: { input: 0, output: 0, totalTokens: 0 },
+      timestamp: 1,
+    };
+  }
+
+  it("estimateTokens 把思考算进去（思考会回传，真的占输入 token）", () => {
+    const withReasoning = estimateTokens([messageWithReasoning()]);
+    const textOnly = estimateTokens([
+      {
+        role: "assistant",
+        content: [text("答案")],
+        stopReason: "stop",
+        usage: { input: 0, output: 0, totalTokens: 0 },
+        timestamp: 1,
+      },
+    ]);
+
+    expect(withReasoning).toBeGreaterThan(textOnly);
+  });
+
+  it("summarizeEntries 不掺思考（摘要只看正文）", () => {
+    const summary = summarizeEntries([messageWithReasoning()]);
+
+    expect(summary).toContain("答案");
+    expect(summary).not.toContain("想了很多很多");
   });
 });

@@ -10,11 +10,16 @@
 // 消费循环（谁发起 SSE、何时发）在 run-store.ts；本文件只管"状态怎么变"。
 // ============================================================
 
-import type { AgentMessage, SessionStats, TodoItem } from "@/lib/types";
+import type {
+  AgentEvent,
+  AgentMessage,
+  SessionStats,
+  TodoItem,
+} from "@/lib/types";
 import type { AskQuestion } from "@/lib/tools/ask-user";
 import type { ContextPressure } from "@/app/lib/context-occupancy";
 import type { ObservedEvent, StreamFrame } from "../sse";
-import { appendDelta, replaceLast } from "../messages";
+import { appendDelta, appendReasoningDelta, replaceLast } from "../messages";
 
 // ---- 桶状态类型 ----
 
@@ -143,6 +148,32 @@ function toApprovalRequest(frame: {
 }
 
 /**
+ * 消息类事件改转录稿，其余事件只进时间线（不碰 messages）。
+ *
+ * 为什么从 `foldRunFrame` 里拆出来：那是个大 switch，每加一种流式事件就多一条分支，
+ * 复杂度会一条条撞上 ESLint 的上限（15）。拆成"帧怎么分类"与"消息怎么变"两件事之后，
+ * 两边都只做一件事 —— 上一版加 `reasoning_update` 时当场撞线（complexity 16）。
+ */
+function foldMessageEvent(
+  messages: AgentMessage[],
+  ev: AgentEvent,
+): AgentMessage[] {
+  switch (ev.type) {
+    case "message_start":
+      return [...messages, ev.message];
+    case "message_update":
+      return appendDelta(messages, ev.delta);
+    case "reasoning_update":
+      // 思考走独立通道（C58 P3）：落进同一块（没有就插在最前）
+      return appendReasoningDelta(messages, ev.contentIndex, ev.delta);
+    case "message_end":
+      return replaceLast(messages, ev.message);
+    default:
+      return messages;
+  }
+}
+
+/**
  * 一帧推进一桶：纯函数，返回新 RunState（不变则返回原引用）。
  * at 是观测时刻，由调用方注入（消费循环里 Date.now()；测试传固定值），
  * 保持本函数无副作用、可单测。
@@ -162,22 +193,11 @@ export function foldRunFrame(
         ...state.observed,
         { seq: state.observed.length + 1, at, event: ev },
       ];
-      // 事件内部再按消息事件折叠；其他事件类型只进时间线，不碰转录稿
-      let messages = state.messages;
-      switch (ev.type) {
-        case "message_start":
-          messages = [...messages, ev.message];
-          break;
-        case "message_update":
-          messages = appendDelta(messages, ev.delta);
-          break;
-        case "message_end":
-          messages = replaceLast(messages, ev.message);
-          break;
-        default:
-          break;
-      }
-      return { ...state, observed, messages };
+      return {
+        ...state,
+        observed,
+        messages: foldMessageEvent(state.messages, ev),
+      };
     }
 
     case "done":

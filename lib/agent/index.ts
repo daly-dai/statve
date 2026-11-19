@@ -221,6 +221,17 @@ export async function runAgentLoop(options: RunAgentLoopOptions): Promise<{
       onDelta: (delta) => {
         emit({ type: "message_update", message: streamingMessage, delta });
       },
+      // 思考走独立通道（C58 P3）：与正文同一个"流式中"语义，但落在另一种事件上。
+      // 为什么不并进 message_update：见 lib/types.ts 里 `reasoning_update` 的注释
+      // （现有消费者全都在消费 message_update.delta，加字段等于让每一处都去判）。
+      onReasoningDelta: (delta, contentIndex) => {
+        emit({
+          type: "reasoning_update",
+          message: streamingMessage,
+          contentIndex,
+          delta,
+        });
+      },
     });
 
     // 2b. 模型的回复同时进入「上下文」和「本轮新增记录」

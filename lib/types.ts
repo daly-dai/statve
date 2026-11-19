@@ -30,6 +30,22 @@ export type ToolCallContent = {
   arguments: Record<string, unknown>;
 };
 
+/**
+ * 模型的「思考」（DeepSeek 的 `reasoning_content`，其他家叫 thinking）。
+ *
+ * 为什么是一等内容块，而不是 `AssistantMessage` 上的一个字符串字段（2026-11-19 定）：
+ *   ① **回传要按厂商原生字段发回去** —— 拼进 text 就再也分不清哪一段该走哪个字段；
+ *   ② **前端流式要按块寻址** —— 增量落在哪一块，靠 `reasoning_update` 的 contentIndex；
+ *   ③ DSH / pi 两家都是一等块（`llm/src/types.ts:74-78`、`ai/src/types.ts:436-444`）。
+ *
+ * ⚠️ 它**不是对话内容**：`messageText` 必须跳过它（否则标题/预览会掺进思考），
+ * 压缩摘要也必须跳过它（见 `lib/summarize` 的 serializeConversation）。
+ */
+export type ReasoningContent = {
+  type: "reasoning";
+  text: string;
+};
+
 // --- 消息类型（联合类型） ---
 
 export type UserMessage = {
@@ -48,11 +64,23 @@ export type UserMessage = {
 
 export type AssistantMessage = {
   role: "assistant";
-  content: Array<TextContent | ToolCallContent>;
+  content: Array<TextContent | ToolCallContent | ReasoningContent>;
   stopReason: "stop" | "toolUse" | "error" | "aborted";
   usage: Usage;
   timestamp: number;
   errorMessage?: string;
+  /**
+   * **产地**：这条消息是哪个端点 + 哪个模型产的（2026-11-19，C58）。
+   *
+   * 唯一用途：决定"历史里的思考要不要回传给模型"。规则（详案 4.17）：
+   *   没有 origin（老数据 / MockModel）  → 不回传
+   *   origin ≠ 本次请求 (baseUrl, model) → 不回传（换模型了）
+   *   origin == 本次请求                 → 回传 reasoning_content
+   *
+   * 为什么是 `baseUrl` 而不是我们自己的 `provider` 标签：决定线上兼容性的是**端点** ——
+   * 同一个 model id 走官方直连和走网关，行为可能不同（DSH 的"网关靠哈希恢复签名"那条坑）。
+   */
+  origin?: { baseUrl: string; model: string };
 };
 
 export type ToolResultMessage = {
@@ -107,7 +135,7 @@ export type ToolResult = {
   terminate?: boolean;
 };
 
-// --- Agent 事件（12 种事件类型，前端逐条展示） ---
+// --- Agent 事件（13 种事件类型，前端逐条展示） ---
 
 export type AgentEvent =
   | { type: "agent_start" }
@@ -121,6 +149,21 @@ export type AgentEvent =
     }
   | { type: "message_start"; message: AgentMessage }
   | { type: "message_update"; message: AssistantMessage; delta: string }
+  /**
+   * 思考的逐段增量（C58 P3，2026-11-19）。
+   *
+   * 为什么单独一种事件而不是给 `message_update` 加 `channel` 字段：现有所有消费者
+   * （`run-fold` / `trace-fold` / `trace-steps` / 若干测试 + 前端）都在消费
+   * `message_update.delta`，加字段意味着每一处都要判，漏一处就把思考当正文渲染。
+   * 新事件是**加法**：不认识它的消费者只会把它归进时间线（`observed`），不会误渲染。
+   */
+  | {
+      type: "reasoning_update";
+      message: AssistantMessage;
+      /** 这段增量落在 content 的第几块（现在恒为 0；见 lib/model.ts 的说明） */
+      contentIndex: number;
+      delta: string;
+    }
   | { type: "message_end"; message: AgentMessage }
   | {
       type: "tool_execution_start";

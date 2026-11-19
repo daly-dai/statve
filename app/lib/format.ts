@@ -2,12 +2,16 @@
 // 格式化工具 —— 纯函数，只负责把数字/文本变成可读的展示
 // ============================================================
 
-import type { TextContent, ToolCallContent } from "@/lib/types";
+import type {
+  ReasoningContent,
+  TextContent,
+  ToolCallContent,
+} from "@/lib/types";
 import type { ObservedEvent } from "./sse";
 
-/** 消息内容的总字数（只数文本块，工具调用块不算） */
+/** 消息内容的总字数（只数文本块：思考不算"输出"，工具调用块也不算） */
 export function textLength(
-  content: Array<TextContent | ToolCallContent>,
+  content: Array<TextContent | ToolCallContent | ReasoningContent>,
 ): number {
   return content.reduce(
     (sum, block) => sum + (block.type === "text" ? block.text.length : 0),

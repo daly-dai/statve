@@ -26,6 +26,7 @@ import {
   text,
 } from "../message";
 import { FakeModel } from "../testing/fake-model";
+import type { TeachingModel } from "../model";
 import type {
   AgentEvent,
   AgentMessage,
@@ -72,7 +73,7 @@ function makeEchoTool(executed: Record<string, unknown>[]): ToolExecutor {
 
 /** 构造一次 runAgentLoop 的最小参数（其余选项各测试自定） */
 function baseOptions(overrides: {
-  model: FakeModel;
+  model: TeachingModel;
   registry?: ToolRegistry;
   tools?: ToolCallContent[];
 }): Parameters<typeof runAgentLoop>[0] {
@@ -403,5 +404,51 @@ describe("runAgentLoop —— 容错与护栏", () => {
       ["tool-1", "第一块"],
       ["tool-1", "第二块"],
     ]);
+  });
+});
+
+// ---------- C58 P3：思考的独立通道 ----------
+
+describe("runAgentLoop —— 思考通道（C58 P3）", () => {
+  it("模型调 onReasoningDelta → 发出 reasoning_update（带 contentIndex），不混进 message_update", async () => {
+    const model: TeachingModel = {
+      async complete(input) {
+        input.onReasoningDelta?.("先想", 0);
+        input.onReasoningDelta?.("再想", 0);
+        input.onDelta?.("答");
+        return createAssistantMessage([text("答")]);
+      },
+    };
+
+    const { events } = await runAgentLoop(baseOptions({ model }));
+
+    const reasoning = events.filter((e) => e.type === "reasoning_update");
+    expect(reasoning).toHaveLength(2);
+    expect(reasoning[0]).toMatchObject({ contentIndex: 0, delta: "先想" });
+    expect(reasoning[1]).toMatchObject({ contentIndex: 0, delta: "再想" });
+
+    // 正文仍然只走 message_update —— 两条通道不串
+    const textUpdates = events.filter((e) => e.type === "message_update");
+    expect(textUpdates).toHaveLength(1);
+    expect(textUpdates[0]).toMatchObject({ delta: "答" });
+  });
+
+  it("thinking 与正文的事件顺序：reasoning_update 全在 message_update 之前", async () => {
+    const model: TeachingModel = {
+      async complete(input) {
+        input.onReasoningDelta?.("想", 0);
+        input.onDelta?.("答");
+        return createAssistantMessage([text("答")]);
+      },
+    };
+
+    const { events } = await runAgentLoop(baseOptions({ model }));
+    const streamed = events
+      .map((e) => e.type)
+      .filter(
+        (type) => type === "reasoning_update" || type === "message_update",
+      );
+
+    expect(streamed).toEqual(["reasoning_update", "message_update"]);
   });
 });
