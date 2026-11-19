@@ -94,6 +94,14 @@ export type ProcessStep =
       status: "ok" | "error" | "pending";
       result: string;
     }
+  /**
+   * 模型的思考（C58）：也是过程里的一条 —— 不是回答。
+   *
+   * 为什么它算"过程"而不是"回答"：一轮里思考可能有好几段（每次工具调用前后各一段），
+   * 而"回答"只有最后那段正文。DSH 是同一种切法（`process-groups.ts:156-163`：
+   * *"One Node, two rows: reasoning joins the step run, a reply stands outside it"*）。
+   */
+  | { kind: "reasoning"; text: string }
   /** 中途叙述：组内按正文字号渲染，不压成 24px 行（罕见，但不能丢） */
   | { kind: "text"; text: string }
   /** 非对话记录：上下文压缩 / 技能注入。一行，点开看细节 */
@@ -236,9 +244,12 @@ function pushBlock(input: {
   results: ReadonlyMap<string, { status: "ok" | "error"; result: string }>;
 }): void {
   const { turn, block, blockIndex, answerStart, results } = input;
-  // 思考块（C58 P1）：数据层已经落盘、也在 answerStart 的判定里算"非文本块"，
-  // 但**渲染**归 P2（要新增一种 step + 组件）。这一期先不收进 steps。
-  if (block.type === "reasoning") return;
+  // 思考块（C58）：进过程组，**不是**回答 —— 回答的判定（answerStartOf）会把它
+  // 当成"非文本块"，所以它之后的正文才是回答。
+  if (block.type === "reasoning") {
+    turn.steps.push({ kind: "reasoning", text: block.text });
+    return;
+  }
   if (block.type === "text") {
     const text = block.text.trim();
     if (text === "") return;
@@ -345,6 +356,40 @@ export function countByCategory(
       count: counts.get(category) ?? 0,
     }),
   );
+}
+
+/**
+ * 思考行的折叠摘要（C58，抄 DSH `ReasoningRow.tsx:12-33,64-65` 的判据）：
+ *
+ * | 时机 | 取哪一行 |
+ * |---|---|
+ * | **运行中** | 最近一个**已完成段落**的首行（正在写的那半截不算 —— 否则摘要会一直跳） |
+ * | **结束后** | 全文首行（定下来，不再变） |
+ *
+ * 两种都把 `**` 去掉：这是 24px 行的纯文本，不是 Markdown。
+ * 返回空串 = 这一行不给摘要（空思考不占位）。
+ */
+export function reasoningSummary(text: string, running: boolean): string {
+  const line = running
+    ? lastCompletedParagraphFirstLine(text)
+    : firstLine(text);
+  return line.replaceAll("**", "").trim();
+}
+
+function firstLine(text: string): string {
+  const newline = text.indexOf("\n");
+  return newline === -1 ? text : text.slice(0, newline);
+}
+
+/** 按空行切段；只有"已经出现过换行"的段落才算写完（最后那半截不算） */
+function lastCompletedParagraphFirstLine(text: string): string {
+  let summary = "";
+  for (const paragraph of text.split(/\r?\n[ \t]*\r?\n/)) {
+    if (!paragraph.includes("\n")) continue;
+    const line = firstLine(paragraph).trim();
+    if (line !== "") summary = line;
+  }
+  return summary;
 }
 
 /**

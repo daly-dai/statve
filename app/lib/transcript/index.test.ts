@@ -12,6 +12,7 @@ import {
   buildTranscript,
   countByCategory,
   formatElapsed,
+  reasoningSummary,
   toolCategoryOf,
 } from "./index";
 
@@ -336,15 +337,42 @@ describe("思考块（C58 P1）", () => {
     };
   }
 
-  it("不产出工具步 —— 旧代码把它当 toolCall，args 是 undefined，崩在组件里", () => {
+  it("进过程组，但**不是**工具步 —— 旧代码把它当 toolCall（args: undefined），崩在组件里", () => {
     const turn = buildTranscript([user("问"), withReasoning()])[0];
 
     expect(turn.steps.some((step) => step.kind === "tool")).toBe(false);
+    expect(turn.steps[0]).toMatchObject({
+      kind: "reasoning",
+      text: "先想了一下",
+    });
   });
 
   it("思考算「非文本块」，所以它之后的正文才是回答", () => {
     const turn = buildTranscript([user("问"), withReasoning()])[0];
 
     expect(turn.answer).toBe("答案");
+  });
+});
+
+describe("思考摘要（C58 P2）", () => {
+  it("结束后取全文首行", () => {
+    expect(reasoningSummary("先看目录\n再看文件", false)).toBe("先看目录");
+  });
+
+  it("运行中取「最近一个已完成段落」的首行（半截段落不算）", () => {
+    const streaming = "第一段第一行\n第一段第二行\n\n第二段还没写完";
+    expect(reasoningSummary(streaming, true)).toBe("第一段第一行");
+  });
+
+  it("运行中还没有任何完成段落时不给摘要", () => {
+    expect(reasoningSummary("只有一行还没换行", true)).toBe("");
+  });
+
+  it("去掉 ** 标记（24px 是纯文本行，不是 Markdown）", () => {
+    expect(reasoningSummary("**重点**：看这里", false)).toBe("重点：看这里");
+  });
+
+  it("空思考返回空串（组件据此整行不渲染）", () => {
+    expect(reasoningSummary("   ", false)).toBe("");
   });
 });
