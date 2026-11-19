@@ -850,6 +850,23 @@ case "reasoning_update":
 | 压缩输入 `serializeConversation`（`lib/summarize/index.ts:160-167`） | 只收 `text` 与 `toolCall` 两种块 ⇒ 思考天然排除（符合默认 3） |
 | 会话落盘（`lib/session/store`） | 整条消息 `JSON.stringify` ⇒ 新块与 `origin` 自动落盘，无 schema 校验要改 |
 
+#### ⑨ 实施记录（2026-11-19，P1 → P2 → P3 当天走完）
+
+| 期 | commit | 落点 |
+|---|---|---|
+| P1 数据 | `7ada4c5` | 类型 + 适配器（解析 / 组装 / 中止路径 / 产地）+ 回传判定 + `estimateTokens` 拆两个口径 + `transcript` 兜底修正 |
+| P2 静态渲染 | `24268e2` | `transcript` 的 `reasoning` step + `reasoningSummary` + `ReasoningRow` 组件与样式 |
+| P3 实时（红线） | `99a4d12`（接口 / 适配器 / 前端折叠）+ `526aad7`（**引擎，单独一个 commit**） | `onReasoningDelta` → `reasoning_update` → `appendReasoningDelta` |
+
+**实施中撞到的四个坑（都记下来，别重复踩）**：
+
+1. **旧前端 + 新数据 = 崩在很远的地方**（P1 之后立刻发生）。给 `content` 加了 `reasoning` 块之后，**浏览器里还是旧的 `transcript` 代码**，而它的兜底是「不是 text 就当 toolCall」⇒ 给思考块造了个 `{ kind:"tool", args: undefined }` ⇒ 崩在组件的 `Object.keys(undefined)`（`argBrief`）。**修法不是补空值**，而是把兜底改成**显式认 `toolCall`、其余不渲染** —— "不认识的块宁可不动"。
+2. **继承会被内层直接规则顶掉**（P2 之后立刻发生）。`.reasonBody` 写了 `font-size: 12.5px`，但里面 `<Markdown>` 渲染的 `.markdown-body` 是 **15px**（`app/globals.css`），直接规则永远赢过继承 ⇒ 展开的思考比「思考」二字大一号，用户当场指出。修法：`:global(.markdown-body)` 显式压到 **12px**（与行同字号）。
+3. **加一个事件就撞复杂度上限**。`foldRunFrame` 的 switch 加了 `reasoning_update` 后 complexity 16 > 15（ESLint），修法是把"消息类事件怎么改转录稿"拆成 `foldMessageEvent` —— 两边各只做一件事。
+4. **思考占位消息的块序**。引擎先发 `createAssistantMessage([text("")])`，思考增量如果 `push` 到末尾会得到 `[text, reasoning]`（倒序）。`appendReasoningDelta` 里因此是"没有思考块就**按 contentIndex 插入**"，不是 push。
+
+**读数**：单测 887 → **911**（+24：适配器 10 / 引擎 2 / run-fold 3 / transcript 5 / store 2，另有 P2 的 2 条改造）· `tsc` / `eslint` / `prettier` 全 0 · 真机由用户验收（思考行随流生长、工具出现即收束、刷新后仍在）。
+
 ---
 
 ## 五、验收
