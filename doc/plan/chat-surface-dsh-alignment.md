@@ -637,6 +637,219 @@ const open = manual ?? !collapsedByDefault;
 
 ---
 
+### 4.17 C58 定案补记（2026-11-19）：三条数据决定 + 两档实施
+
+> 4.8 / 4.9 是 2026-11-18 写的**草案**，当时只有"DSH 长什么样"的二手印象。这一节是看完 DSH / pi / opencode 三方源码 + 两轮真机探针之后的**定案**，与草案冲突处以本节为准（草案保留，是为了留下"当时以为要怎么做"的时间线）。
+
+#### ① 先说一个改变判断的事实：思考的钱我们一直在付
+
+DeepSeek 官方文档：**思考模式默认打开，effort 默认 high**；我们的适配器从不发 `thinking` 参数 ⇒ 一直开着。
+
+2026-11-19 探针（`api.deepseek.com`，`deepseek-v4-flash`，用 `.env.local` 的 key）：
+
+| 步骤 | 结果 |
+|---|---|
+| 带 tools 问「杭州天气，先用工具查」 | 200，**`reasoning_content` 69 字符**，`content` 0 字符，直接调工具 |
+| 再问「那明天呢」 | 200，**`reasoning_content` 735 字符** |
+| 第二步历史里**不带** `reasoning_content` | **200（不报错）** |
+| 第二步历史里**带** `reasoning_content` | 200 |
+
+⇒ 思考 token 计入 output、**一直在花**，只是文本被扔了（`lib/deepseekModel/index.ts:328-332` 只读 `delta.content`）。
+
+#### ② 拍板记录（2026-11-19，用户逐条拍）
+
+| # | 问题 | 拍板 | 依据 |
+|---|---|---|---|
+| 1 | 存不存 | **甲：进消息 + 落盘** | DSH / pi / opencode 三家都落盘；只留内存 = 第一次看漏就永远看不到 |
+| 2 | 回不回传 | **甲：按"产地"判定**（同产地回传，换模型丢） | 官方要求带 tools 必须回传；实测不报错但**宽松是运气不是契约**；pi 换模型时连可读文本一起丢 |
+| 3 | 消息模型 | **甲：新内容块** `{type:"reasoning"}` | DSH / pi 都是一等块；块是回传的前提（拼进 text 就分不清哪段走 `reasoning_content`） |
+| 4 | 实时事件 | **甲+：新事件 + `contentIndex`** | 借用 pi 的**寻址**，不买 pi 的**生命周期**（见 ④） |
+| 5 | 流式默认 | **甲：折叠 24px + 摘要扫光** | DSH `ReasoningRow` |
+| 6 | 多段排列 | **甲：每段一行** | opencode 的 `ordinal` 就是一段一行；合并会丢"哪段对应哪次工具调用" |
+| 7 | 跑完摘要 | **甲：保留首行摘要** | DSH 的 standard 档位；我们还没有档位系统 |
+| 默认 1 | 空思考 | 不渲染、不占位 | DSH `ReasoningRow.tsx:84` |
+| 默认 2 | 出错 / 被中断 | **和工具行同一套规则**：内容保留，收起交给 C57 的"只要不在跑就折"，**不做特例**；数据上不回传给 API | 用户 2026-11-19 原话「思考和工具调用不是一样的吗，报错和结束的时候直接收起了」；DSH `assembler.ts:169-179` 也是保留已收到的前缀 |
+| 默认 3 | 压缩摘要 | **排除思考** | pi `compaction/utils.ts:115-120`、opencode `recent-text.ts:39-45` |
+| 默认 4 | `<signature>` 剥离 | **不做** | DSH 里那层是防御性代码，本仓没有生产者 |
+| 默认 5 | 思考归哪 | **进过程组**，不当"最终回答" | DSH `process-groups.ts:156-163` |
+| 默认 6 | 折叠高度 | **24px 硬锁** + `contain: size layout` | DSH `ReasoningRow.module.css:6-9` |
+
+#### ③ 为什么 Q4 只抄"寻址"不抄"生命周期"（一条要记住的判据）
+
+pi 的块级协议（`thinking_start` / `thinking_delta` / `thinking_end`）是 **Anthropic wire 协议的直译**：Anthropic 的流本来就是 `content_block_start` / `content_block_delta` / `content_block_stop`（`pi/packages/ai/src/api/anthropic-messages.ts:988-1004,1032-1041`），`contentIndex` 就是它的 `event.index`。
+
+**而 DeepSeek 的 chat-completions 流里没有"块"这个概念** —— 只有 `delta.reasoning_content` 然后 `delta.content`。在 DeepSeek 上做 `*_start`/`*_end`，等于**在适配器里凭空造两个上游不存在的边界**，再让引擎和前端去依赖它。
+
+⇒ 分界线是：**"错了不报错"的提前防，"错了会显形"的等需求逼**。
+
+| | Q2 的产地戳 | Q4 的块协议 |
+|---|---|---|
+| 不做的后果 | 换端点后**静默变味**，一个月后发现且无法归因 | C25 时**重写一次前端**，改的时候看得见 |
+| 花费 | 约 20 行（一个可选字段 + 一处比对） | 引擎重写 + 前端累积逻辑重写 + 6–8 文件 |
+| 结论 | 现在做 | **等 C25（接第二家 provider）再做** |
+
+这与项目既有规矩一致：**接缝由需求逼出来，不预挖空壳**。等 C25 落地时再把 `onDelta` / `onReasoningDelta` 统一成 pi 那种 canonical 事件（各 provider 映射到同一词汇表）。
+
+#### ④ 详细设计
+
+**（1）类型**（`lib/types.ts`）
+
+```ts
+export type ReasoningContent = { type: "reasoning"; text: string };
+
+export type AssistantMessage = {
+  role: "assistant";
+  content: Array<TextContent | ToolCallContent | ReasoningContent>;
+  /**
+   * 产地：谁产的这段思考。回传时据它决定带不带 reasoning_content。
+   * 为什么是 baseUrl + model 而不是 provider：决定线上兼容性的是**端点**，
+   * 同一个 model id 走直连和走网关行为可能不同（DSH 的"网关靠哈希恢复签名"那条坑）。
+   */
+  origin?: { baseUrl: string; model: string };
+  // …原有字段
+};
+```
+
+加块类型会让所有按 `type` 过滤 `content` 的地方**编译期报错** —— 这是好事，逼我们逐个表态：
+
+| 地方 | 要求 |
+|---|---|
+| `lib/deepseekModel` 的 `toOpenAiMessages` | 思考**不走 `content`**，走 `reasoning_content` 顶层字段（见下） |
+| `lib/message` 的 `messageText` | 只拼 `text` 块（否则标题/预览/摘要掺进思考） |
+| 压缩摘要的输入 | 只拼 `text` 块（默认 3） |
+| 前端 `transcript` | 思考 → 过程组的一条 step，**不是** answer |
+
+**（2）适配器**（`lib/deepseekModel`）
+
+- `StreamAccumulator` 加 `reasoningBuffer: string`；
+- 每个 delta **先**吃 `reasoning_content`、**再**吃 `content`（同一个 delta 两者都带时，思考必须排在正文前 —— pi `openai-completions.ts:577-579` 的注释就是为了 LiteLLM 那类代理）；
+- 非流式：读 `message.reasoning_content`；
+- 组装：reasoning 块 **push 在最前**（事实顺序：先想后答）；文本为空且有工具调用时不造空 text 块（沿用 `withFallbackText` 的既有逻辑，但要保证"只有思考 + 工具调用"不会变成"空回复"）；
+- `origin` 在这里盖章：`{ baseUrl, model }`（适配器两者都知道）；
+- **不做** `<signature>` 剥离（默认 4）。
+
+**（3）序列化 / 回传**（`toOpenAiMessages`）
+
+```ts
+const sameOrigin =
+  message.origin !== undefined &&
+  message.origin.baseUrl === currentBaseUrl &&
+  message.origin.model === currentModel;
+
+result.push({
+  role: "assistant",
+  content: plainText.length > 0 ? plainText : null,
+  // 只在"产地一致"时回传；老消息没有 origin ⇒ 不回传（保守）
+  ...(sameOrigin && reasoningText.length > 0
+    ? { reasoning_content: reasoningText }
+    : {}),
+  ...(toolCalls.length > 0 ? { tool_calls: … } : {}),
+});
+```
+
+**（4）实时事件**（P3，红线）
+
+```ts
+// lib/types.ts
+| { type: "reasoning_update"; message: AssistantMessage; contentIndex: number; delta: string }
+
+// lib/model.ts
+onReasoningDelta?: (delta: string, contentIndex: number) => void;
+```
+
+引擎里只有一处接线（`lib/agent/index.ts` 的 `options.model.complete` 调用）：
+
+```ts
+onReasoningDelta: (delta, contentIndex) => {
+  emit({ type: "reasoning_update", message: streamingMessage, contentIndex, delta });
+},
+```
+
+**（5）前端累积**（`app/lib/run-fold`）
+
+```ts
+case "reasoning_update":
+  messages = appendDeltaToBlock(messages, ev.contentIndex, ev.delta);
+```
+
+新纯函数 `appendDeltaToBlock(messages, index, delta)`：把 delta 追加到末尾 assistant 消息的 `content[index]`（类型必须是 reasoning 或 text，否则原样返回）。**这是 `contentIndex` 唯一真正的用处** —— 现有 `appendDelta` 只会往"最后一个 text 块"加，思考块出现后必须会寻址。
+
+**（6）UI 规格**（照 DSH 的读数）
+
+| 项 | 值 |
+|---|---|
+| 折叠行高 | 24px（`--hit` 之外的新常量，硬锁） |
+| 摘要（运行中） | 最近一个**已完成段落**的首行 |
+| 摘要（结束后） | 全文首行 |
+| 摘要清洗 | 去掉 `**` |
+| 流式视觉 | 右侧 48px 渐隐（`mask-image`），并**关掉省略号**；整行套扫光（shimmer） |
+| 展开 | 完整 Markdown，13px 次要字号，22px 缩进 |
+| 空 | 去空白后为空 ⇒ 整行不渲染 |
+
+**（7）顺序不变量（写死，前端据此判"思考结束"）**
+
+> **同一轮内，reasoning 增量全部出现在第一个 text / toolCall 增量之前。**
+
+这是 DeepSeek 协议决定的，2026-11-19 探针验过（第一轮 reasoning 69 字符 + content 0 字符）。所以我们**不需要** `reasoning_end` 事件：第一次收到 text/toolCall，思考就结束了；`message_end` 再整体覆盖兜底。
+
+#### ⑤ 分期（P1 → P2 → P3，P3 是红线）
+
+| 期 | 做什么 | 动红线 | 独立验收 |
+|---|---|---|---|
+| **P1 数据** | 类型 + 适配器解析 + `origin` 盖章 + 序列化回传判定 + 三处过滤（`messageText` / 压缩 / 摘要） | ❌ | 消息里有 reasoning 块、落盘、刷新后仍在；换模型不回传 |
+| **P2 静态渲染** | `transcript` 把 reasoning 变成过程组的一行（折叠 + 摘要 + 展开） | ❌ | 历史回合能看到思考行，展开可读 |
+| **P3 实时** | `reasoning_update` + 引擎接线 + `appendDeltaToBlock` + 流式视觉 | ✅ **红线流程 + 单独 commit** | 边跑边看，元素不闪 |
+
+#### ⑥ 验收
+
+**单测（node，纯函数/适配器层）**
+
+1. 流式解析：`reasoning_content` 累积成块；同一 delta 同时带两者时**思考在前**；
+2. 非流式解析：`message.reasoning_content` → 块；
+3. 只有思考 + 工具调用 ⇒ 不产生空 text 块（`withFallbackText` 不被误触发）；
+4. 序列化：同 `origin` ⇒ 带 `reasoning_content`；不同 `origin` ⇒ 不带；无 `origin` ⇒ 不带（三条）；
+5. `messageText` 忽略 reasoning 块（标题/预览不掺思考）；
+6. 压缩输入不含 reasoning；
+7. `transcript`：reasoning 进过程组、不进 answer；空思考不产出 step；
+8. `reasoningSummary(text, running)`：运行中取最近完成段落首行 / 结束后取首行 / 去 `**` / 空串（四条）；
+9. `appendDeltaToBlock`：按 index 追加、index 越界或类型不符时原样返回。
+
+**真机（P3 之后）**
+
+10. 一轮问答：思考行出现 → 展开可读 → 内容与思考不串；
+11. 带工具的一轮：3 次工具 ⇒ 3 段思考各一行；
+12. 刷新 / 切会话回来：思考行仍在；
+13. 被停止的轮：已收到的思考保留并标"被停止"。
+
+**静态**：`tsc` 0 · `eslint` 0 · `prettier --check` 0 · 全量单测绿 · `check-plan` 0。
+
+#### ⑦ 明确不做
+
+- `<signature>` 剥离（默认 4，没有生产者）
+- 块级流协议（`*_start` / `*_end`）—— 等 C25
+- 思考的折叠档位系统（compact / standard）—— 我们还没有档位
+- 思考进摘要 / 会话标题 / 预览
+- 思考的搜索与复制（以后真有人要再说）
+
+#### ⑧ 开工前补的缺口（2026-11-19 通读后加，原设计漏了）
+
+| # | 漏了什么 | 现在什么样 | 要改成什么 | 归属 |
+|---|---|---|---|---|
+| 1 | **上下文占用估算** | `lib/session/store/index.ts:419-431` 的 `extractText` 只拼 `text` 块，`estimateTokens` 拿它算 → **思考不算进上下文** | 回传的思考**会变成下一轮的输入 token**，必须计入。拆成两个函数：`textForSummary`（排除思考，摘要用）与 `textForTokenEstimate`（含思考，估算用） | P1 |
+| 2 | **中止路径** | `completeStreaming` 的 catch 里手动拼 aborted 消息，只用了 `acc.textBuffer`（`lib/deepseekModel/index.ts:229-239`） | 把 `acc.reasoningBuffer` 一起带上 —— 否则"被停止的轮，已收到的思考"会丢，与默认 2 矛盾 | P1 |
+| 3 | **`isTextContent` 的类型守卫** | `lib/message.ts:70-74` 签名是 `(block: TextContent \| ToolCallContent)` | 加块后签名要扩，或改成按 `block.type === "text"` 收窄；这是编译器会指出的那批之一 | P1 |
+| 4 | **前端「往哪块加增量」** | `app/lib/run-fold` 的 `appendDelta` 只会追加到"最后一个 text 块" | P3 要加 `appendDeltaToBlock(messages, contentIndex, delta)` | P3 |
+
+**查过但**不需要**改的**（省得以后有人以为漏了）：
+
+| 地方 | 为什么不用改 |
+|---|---|
+| `messageText`（`lib/message.ts:56-68`） | 用 `block.type === "text"` 过滤 ⇒ 思考天然被排除（标题/预览不掺思考） |
+| 压缩输入 `serializeConversation`（`lib/summarize/index.ts:160-167`） | 只收 `text` 与 `toolCall` 两种块 ⇒ 思考天然排除（符合默认 3） |
+| 会话落盘（`lib/session/store`） | 整条消息 `JSON.stringify` ⇒ 新块与 `origin` 自动落盘，无 schema 校验要改 |
+
+---
+
 ## 五、验收
 
 ### 5.1 单测（新增的都是纯函数，node 环境）
