@@ -61,3 +61,5 @@ next-env.d.ts
 # 本地冒烟测试日志（E2 步骤3 起 dev server 时产生）
 dev-server.log
 .scratch
+# AgentTeams 的本地状态（DSH 会话工具生成的，不是项目文件；2026-11-19 加）
+.agent-teams/
