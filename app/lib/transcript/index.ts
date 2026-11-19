@@ -22,6 +22,7 @@
 import type {
   AgentMessage,
   AssistantMessage,
+  ReasoningContent,
   TextContent,
   ToolCallContent,
 } from "@/lib/types";
@@ -228,13 +229,16 @@ export function buildTranscript(
 /** 一条助手消息里的一个块：正文进回答或过程，工具调用进过程 */
 function pushBlock(input: {
   turn: TranscriptTurn;
-  block: TextContent | ToolCallContent;
+  block: TextContent | ToolCallContent | ReasoningContent;
   blockIndex: number;
   /** 回答从这个块下标开始（Infinity = 这条消息不产出回答） */
   answerStart: number;
   results: ReadonlyMap<string, { status: "ok" | "error"; result: string }>;
 }): void {
   const { turn, block, blockIndex, answerStart, results } = input;
+  // 思考块（C58 P1）：数据层已经落盘、也在 answerStart 的判定里算"非文本块"，
+  // 但**渲染**归 P2（要新增一种 step + 组件）。这一期先不收进 steps。
+  if (block.type === "reasoning") return;
   if (block.type === "text") {
     const text = block.text.trim();
     if (text === "") return;
@@ -245,6 +249,11 @@ function pushBlock(input: {
     turn.steps.push({ kind: "text", text });
     return;
   }
+  // ⚠️ 显式认 toolCall，**不要**写成"不是 text 就当工具调用"。
+  // 2026-11-19 的真事：旧版就是这么兜底的，于是新加的 reasoning 块被当成工具步
+  // （`name: undefined, args: undefined`），一路崩在组件里的 `Object.keys(undefined)` ——
+  // 现场离原因隔了两层。不认识的块宁可**不渲染**，也别硬塞进一个已知形状。
+  if (block.type !== "toolCall") return;
   const result = results.get(block.id);
   turn.steps.push({
     kind: "tool",

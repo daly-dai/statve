@@ -404,19 +404,35 @@ function entryToMessage(entry: SessionEntry): AgentMessage[] {
 /** 拼贴式摘要（降级用）：MOCK 模式 / 模型失败时保信息不崩 */
 export function summarizeEntries(messages: AgentMessage[]): string {
   return messages
-    .map((message) => `${message.role}: ${extractText(message)}`)
+    .map((message) => `${message.role}: ${textForSummary(message)}`)
     .join("\n");
 }
 
-/** 粗略估算 token 数：中英文混合下平均一个字符约 0.5 token，够触发阈值即可 */
+/**
+ * 粗略估算 token 数：中英文混合下平均一个字符约 0.5 token，够触发阈值即可。
+ *
+ * ⚠️ 必须算上**思考**（C58，2026-11-19）：思考会被回传给模型，
+ * 也就是**真的占下一轮的输入 token**。漏掉它会让占用读数偏低、压缩触发偏晚，
+ * 直到真撞上下文上限才发现。
+ */
 export function estimateTokens(messages: AgentMessage[]): number {
   return messages.reduce((sum, message) => {
-    const content = extractText(message);
+    const content = textForTokenEstimate(message);
     return sum + Math.ceil(content.length / 2);
   }, 0);
 }
 
-function extractText(message: AgentMessage): string {
+/** 摘要用：只取正文 —— 思考不参与摘要（C58 的明确决定，抄 pi/opencode） */
+function textForSummary(message: AgentMessage): string {
+  return collectText(message, false);
+}
+
+/** 估算用：正文 + 思考（思考会回传，占输入 token） */
+function textForTokenEstimate(message: AgentMessage): string {
+  return collectText(message, true);
+}
+
+function collectText(message: AgentMessage, includeReasoning: boolean): string {
   // compactionSummary 没有 content 数组，它的"文本"就是 summary
   if (message.role === "compactionSummary") {
     return message.summary;
@@ -424,6 +440,8 @@ function extractText(message: AgentMessage): string {
   const parts: string[] = [];
   for (const block of message.content) {
     if (isTextContent(block)) {
+      parts.push(block.text);
+    } else if (includeReasoning && block.type === "reasoning") {
       parts.push(block.text);
     }
   }

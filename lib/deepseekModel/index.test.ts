@@ -450,3 +450,242 @@ describe("错误策略 —— 不抛异常，转受控消息", () => {
     expect(msg.errorMessage).toContain("stream broken");
   });
 });
+
+// ---------- 思考（C58 P1） ----------
+
+/** 造一条带产地的助手消息（回传规则的夹具） */
+function assistantWithReasoning(
+  origin?: { baseUrl: string; model: string },
+  reasoning = "先想一下",
+): AgentMessage {
+  return {
+    role: "assistant",
+    content: [{ type: "reasoning", text: reasoning }, text("答案")],
+    stopReason: "stop",
+    usage: { input: 1, output: 1, totalTokens: 2 },
+    timestamp: 1,
+    ...(origin === undefined ? {} : { origin }),
+  };
+}
+
+/** 固定在指定端点/模型上的适配器（产地断言要可复现） */
+function modelOn(baseUrl: string, model: string): DeepSeekModel {
+  return new DeepSeekModel({ apiKey: "test-key", baseUrl, model });
+}
+
+describe("思考 —— 解析与组装（C58 P1）", () => {
+  it("流式：reasoning_content 累积成块，且排在正文之前", async () => {
+    stubFetch(() =>
+      sseResponse([
+        'data: {"choices":[{"delta":{"reasoning_content":"先"}}]}\n\n',
+        'data: {"choices":[{"delta":{"reasoning_content":"想"}}]}\n\n',
+        'data: {"choices":[{"delta":{"content":"答"}}]}\n\n',
+        'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+        "data: [DONE]\n\n",
+      ]),
+    );
+
+    const msg = await makeModel().complete({
+      systemPrompt: "sp",
+      messages: [createUserMessage("hi")],
+      tools: [],
+      onDelta: () => {},
+    });
+
+    expect(msg.content.map((b) => b.type)).toEqual(["reasoning", "text"]);
+    expect(msg.content[0]).toMatchObject({ type: "reasoning", text: "先想" });
+    // 思考不进正文：正文只有"答"
+    expect(messageText(msg)).toBe("答");
+  });
+
+  it("非流式：message.reasoning_content 也变成块", async () => {
+    stubFetch(() =>
+      jsonResponse({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: "答案",
+              reasoning_content: "想过了",
+            },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    );
+
+    const msg = await makeModel().complete({
+      systemPrompt: "sp",
+      messages: [createUserMessage("hi")],
+      tools: [],
+    });
+
+    expect(msg.content[0]).toMatchObject({ type: "reasoning", text: "想过了" });
+    expect(messageText(msg)).toBe("答案");
+  });
+
+  it("纯空白的思考不产出块（避免空气泡）", async () => {
+    stubFetch(() =>
+      jsonResponse({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: "答案",
+              reasoning_content: " ",
+            },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    );
+
+    const msg = await makeModel().complete({
+      systemPrompt: "sp",
+      messages: [createUserMessage("hi")],
+      tools: [],
+    });
+
+    expect(msg.content.some((b) => b.type === "reasoning")).toBe(false);
+  });
+
+  it("产地盖章：origin = { baseUrl, model }", async () => {
+    stubFetch(() =>
+      jsonResponse({
+        choices: [
+          {
+            message: { role: "assistant", content: "好" },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    );
+
+    const msg = await modelOn("https://example.test/v1", "m1").complete({
+      systemPrompt: "sp",
+      messages: [createUserMessage("hi")],
+      tools: [],
+    });
+
+    expect(msg.origin).toEqual({
+      baseUrl: "https://example.test/v1",
+      model: "m1",
+    });
+  });
+
+  it("中止时保留已收到的思考（不是只保留正文）", async () => {
+    const encoder = new TextEncoder();
+    const controller = new AbortController();
+
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(
+          encoder.encode(
+            'data: {"choices":[{"delta":{"reasoning_content":"想到一半"}}]}\n\n',
+          ),
+        );
+      },
+      pull(c) {
+        // 先让 signal 变成 aborted，再让流报错 —— 复现"用户按了停止"
+        controller.abort();
+        c.error(new Error("aborted by user"));
+      },
+    });
+    stubFetch(() => new Response(body, { status: 200 }));
+
+    const msg = await makeModel().complete({
+      systemPrompt: "sp",
+      messages: [createUserMessage("hi")],
+      tools: [],
+      onDelta: () => {},
+      signal: controller.signal,
+    });
+
+    expect(msg.stopReason).toBe("aborted");
+    expect(msg.content[0]).toMatchObject({
+      type: "reasoning",
+      text: "想到一半",
+    });
+  });
+});
+
+describe("思考 —— 回传规则（C58 P1）", () => {
+  const BASE = "https://example.test/v1";
+
+  /** 发一条请求，返回请求体里的 messages（assistant 那条） */
+  async function replayAssistant(
+    messages: AgentMessage[],
+    model: string,
+  ): Promise<Record<string, unknown> | undefined> {
+    const capture = stubFetch(() =>
+      jsonResponse({
+        choices: [
+          {
+            message: { role: "assistant", content: "ok" },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    );
+
+    await modelOn(BASE, model).complete({
+      systemPrompt: "sp",
+      messages,
+      tools: [],
+    });
+
+    return capturedBody(capture).messages.find(
+      (m) => m.role === "assistant",
+    ) as Record<string, unknown> | undefined;
+  }
+
+  it("同一产地（baseUrl + model 都对得上）→ 回传 reasoning_content", async () => {
+    const sent = await replayAssistant(
+      [
+        createUserMessage("问"),
+        assistantWithReasoning({ baseUrl: BASE, model: "m1" }),
+      ],
+      "m1",
+    );
+
+    expect(sent?.reasoning_content).toBe("先想一下");
+    // 思考**不能**混进 content（混进去模型会当成自己说过的话）
+    expect(sent?.content).toBe("答案");
+  });
+
+  it("换了模型 → 不回传", async () => {
+    const sent = await replayAssistant(
+      [
+        createUserMessage("问"),
+        assistantWithReasoning({ baseUrl: BASE, model: "m1" }),
+      ],
+      "m2",
+    );
+
+    expect(sent?.reasoning_content).toBeUndefined();
+  });
+
+  it("换了端点（同一 model id）→ 不回传", async () => {
+    const sent = await replayAssistant(
+      [
+        createUserMessage("问"),
+        assistantWithReasoning({
+          baseUrl: "https://gateway.test/v1",
+          model: "m1",
+        }),
+      ],
+      "m1",
+    );
+
+    expect(sent?.reasoning_content).toBeUndefined();
+  });
+
+  it("没有产地（老消息）→ 不回传", async () => {
+    const sent = await replayAssistant(
+      [createUserMessage("问"), assistantWithReasoning(undefined)],
+      "m1",
+    );
+
+    expect(sent?.reasoning_content).toBeUndefined();
+  });
+});

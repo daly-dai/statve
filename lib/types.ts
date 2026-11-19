@@ -30,6 +30,22 @@ export type ToolCallContent = {
   arguments: Record<string, unknown>;
 };
 
+/**
+ * 模型的「思考」（DeepSeek 的 `reasoning_content`，其他家叫 thinking）。
+ *
+ * 为什么是一等内容块，而不是 `AssistantMessage` 上的一个字符串字段（2026-11-19 定）：
+ *   ① **回传要按厂商原生字段发回去** —— 拼进 text 就再也分不清哪一段该走哪个字段；
+ *   ② **前端流式要按块寻址** —— 增量落在哪一块，靠 `reasoning_update` 的 contentIndex；
+ *   ③ DSH / pi 两家都是一等块（`llm/src/types.ts:74-78`、`ai/src/types.ts:436-444`）。
+ *
+ * ⚠️ 它**不是对话内容**：`messageText` 必须跳过它（否则标题/预览会掺进思考），
+ * 压缩摘要也必须跳过它（见 `lib/summarize` 的 serializeConversation）。
+ */
+export type ReasoningContent = {
+  type: "reasoning";
+  text: string;
+};
+
 // --- 消息类型（联合类型） ---
 
 export type UserMessage = {
@@ -48,11 +64,23 @@ export type UserMessage = {
 
 export type AssistantMessage = {
   role: "assistant";
-  content: Array<TextContent | ToolCallContent>;
+  content: Array<TextContent | ToolCallContent | ReasoningContent>;
   stopReason: "stop" | "toolUse" | "error" | "aborted";
   usage: Usage;
   timestamp: number;
   errorMessage?: string;
+  /**
+   * **产地**：这条消息是哪个端点 + 哪个模型产的（2026-11-19，C58）。
+   *
+   * 唯一用途：决定"历史里的思考要不要回传给模型"。规则（详案 4.17）：
+   *   没有 origin（老数据 / MockModel）  → 不回传
+   *   origin ≠ 本次请求 (baseUrl, model) → 不回传（换模型了）
+   *   origin == 本次请求                 → 回传 reasoning_content
+   *
+   * 为什么是 `baseUrl` 而不是我们自己的 `provider` 标签：决定线上兼容性的是**端点** ——
+   * 同一个 model id 走官方直连和走网关，行为可能不同（DSH 的"网关靠哈希恢复签名"那条坑）。
+   */
+  origin?: { baseUrl: string; model: string };
 };
 
 export type ToolResultMessage = {

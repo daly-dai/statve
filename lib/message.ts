@@ -7,6 +7,7 @@ import type {
   AgentMessage,
   AssistantMessage,
   CompactionSummaryMessage,
+  ReasoningContent,
   TextContent,
   ToolCallContent,
   UserMessage,
@@ -68,7 +69,7 @@ export function messageText(message: AgentMessage): string {
 }
 
 export function isTextContent(
-  block: TextContent | ToolCallContent,
+  block: TextContent | ToolCallContent | ReasoningContent,
 ): block is TextContent {
   return block.type === "text";
 }

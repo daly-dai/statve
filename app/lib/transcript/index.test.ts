@@ -321,3 +321,30 @@ describe("formatElapsed：时长只有一个写法（中文分秒）", () => {
     expect(formatElapsed(3_735_000)).toBe("1 小时 2 分");
   });
 });
+
+// ---------- C58：思考块在数据层的去处 ----------
+
+describe("思考块（C58 P1）", () => {
+  /** 一条「思考 + 正文」的助手消息 */
+  function withReasoning(): AssistantMessage {
+    return {
+      role: "assistant",
+      content: [{ type: "reasoning", text: "先想了一下" }, text("答案")],
+      stopReason: "stop",
+      usage: { input: 1, output: 1, totalTokens: 2 },
+      timestamp: 200,
+    };
+  }
+
+  it("不产出工具步 —— 旧代码把它当 toolCall，args 是 undefined，崩在组件里", () => {
+    const turn = buildTranscript([user("问"), withReasoning()])[0];
+
+    expect(turn.steps.some((step) => step.kind === "tool")).toBe(false);
+  });
+
+  it("思考算「非文本块」，所以它之后的正文才是回答", () => {
+    const turn = buildTranscript([user("问"), withReasoning()])[0];
+
+    expect(turn.answer).toBe("答案");
+  });
+});

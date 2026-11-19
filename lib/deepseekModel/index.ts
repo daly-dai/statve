@@ -54,15 +54,28 @@ export type DeepSeekModelOptions = {
 export class DeepSeekModel implements TeachingModel {
   constructor(private readonly options: DeepSeekModelOptions) {}
 
+  /**
+   * 这条消息的「产地」（C58）：端点 + 模型。
+   * 唯一用途是决定历史里的思考要不要回传给 API —— 换端点/换模型时不回传。
+   */
+  private originFor(baseUrl: string): { baseUrl: string; model: string } {
+    return { baseUrl, model: this.options.model ?? DEFAULT_MODEL };
+  }
+
   async complete(input: CompleteInput): Promise<AssistantMessage> {
     const baseUrl = (this.options.baseUrl ?? DEFAULT_BASE_URL).replace(
       /\/+$/,
       "",
     );
     const url = `${baseUrl}/chat/completions`;
+    const origin = this.originFor(baseUrl);
 
     // ① 统一协议 → OpenAI 格式
-    const messages = toOpenAiMessages(input.systemPrompt, input.messages);
+    const messages = toOpenAiMessages(
+      input.systemPrompt,
+      input.messages,
+      origin,
+    );
     const tools =
       input.tools.length > 0 ? toOpenAiTools(input.tools) : undefined;
 
@@ -75,10 +88,10 @@ export class DeepSeekModel implements TeachingModel {
     });
 
     if (input.onDelta) {
-      return this.completeStreaming({ url, input, messages, tools });
+      return this.completeStreaming({ url, input, messages, tools, origin });
     }
 
-    return this.completeNonStreaming({ url, input, messages, tools });
+    return this.completeNonStreaming({ url, input, messages, tools, origin });
   }
 
   // ----------------------------------------------------------
@@ -142,8 +155,9 @@ export class DeepSeekModel implements TeachingModel {
     input: CompleteInput;
     messages: OpenAiMessage[];
     tools: OpenAiTool[] | undefined;
+    origin: { baseUrl: string; model: string };
   }): Promise<AssistantMessage> {
-    const { url, input, messages, tools } = params;
+    const { url, input, messages, tools, origin } = params;
     const result = await this.postChatCompletion({
       url,
       input,
@@ -154,7 +168,7 @@ export class DeepSeekModel implements TeachingModel {
     if (result.kind === "error") return result.message;
 
     const data = (await result.response.json()) as OpenAiResponse;
-    return toTeachingAssistantMessage(data);
+    return toTeachingAssistantMessage(data, origin);
   }
 
   // ----------------------------------------------------------
@@ -165,8 +179,9 @@ export class DeepSeekModel implements TeachingModel {
     input: CompleteInput;
     messages: OpenAiMessage[];
     tools: OpenAiTool[] | undefined;
+    origin: { baseUrl: string; model: string };
   }): Promise<AssistantMessage> {
-    const { url, input, messages, tools } = params;
+    const { url, input, messages, tools, origin } = params;
     // ② 供应商协议 → 统一协议
     const result = await this.postChatCompletion({
       url,
@@ -187,10 +202,11 @@ export class DeepSeekModel implements TeachingModel {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
 
-    // 累积状态：文本直接累积成串；工具调用按 index 累积（OpenAI 流式
+    // 累积状态：文本/思考各自累积成串；工具调用按 index 累积（OpenAI 流式
     // 里同一个 tool_call 的 arguments 会分成多个 chunk 到达）
     const acc: StreamAccumulator = {
       textBuffer: "",
+      reasoningBuffer: "",
       toolCalls: new Map(),
       onDelta: input.onDelta,
     };
@@ -225,14 +241,11 @@ export class DeepSeekModel implements TeachingModel {
         }
       }
     } catch (error) {
-      // 中止 / 断流：把已累积文本作为 partial 返回，不崩
+      // 中止 / 断流：把已累积的思考与文本作为 partial 返回，不崩
       if (input.signal?.aborted) {
         return {
           role: "assistant",
-          content:
-            acc.textBuffer.length > 0
-              ? [text(acc.textBuffer)]
-              : [text("（请求已中止）")],
+          content: abortedContent(acc),
           stopReason: "aborted",
           usage: EMPTY_USAGE,
           timestamp: Date.now(),
@@ -246,9 +259,11 @@ export class DeepSeekModel implements TeachingModel {
 
     return buildStreamMessage({
       textBuffer: acc.textBuffer,
+      reasoningBuffer: acc.reasoningBuffer,
       toolCallsAcc: acc.toolCalls,
       finishReason: acc.finishReason,
       usage: acc.usage,
+      origin,
     });
   }
 
@@ -272,8 +287,10 @@ export class DeepSeekModel implements TeachingModel {
  * 传一个对象比传五个引用清楚，也让"哪个字段被谁改"一眼可见。
  */
 type StreamAccumulator = {
-  /** 已累积的文本（中止时作为 partial 返回） */
+  /** 已累积的正文（中止时作为 partial 返回） */
   textBuffer: string;
+  /** 已累积的思考（DeepSeek 的 reasoning_content；中止时同样要保留） */
+  reasoningBuffer: string;
   /** 工具调用按 index 累积（同一个 tool_call 的 arguments 会分成多个 chunk） */
   toolCalls: Map<number, { id?: string; name?: string; args: string }>;
   /** finish_reason（后到的非空值生效） */
@@ -320,8 +337,23 @@ function consumeSseChunk(
 
   if (!delta) return;
 
+  // ⚠️ 顺序有意义：思考先吃，正文后吃。
+  // 有的网关（LiteLLM 那类）会把 reasoning 与 content 合进同一个 delta，
+  // 而"先想后答"是事实顺序 —— 先处理思考才能保证块序正确
+  // （pi 同款处理：`openai-completions.ts:577-579`）。
+  appendReasoningDelta(delta, acc);
   appendTextDelta(delta, acc);
   appendToolCallDeltas(delta.tool_calls ?? [], acc);
+}
+
+/** 思考增量 → 累积（P1 只存；实时回调在 P3 接） */
+function appendReasoningDelta(
+  delta: OpenAiDelta,
+  acc: StreamAccumulator,
+): void {
+  const piece = delta.reasoning_content;
+  if (typeof piece !== "string" || piece.length === 0) return;
+  acc.reasoningBuffer += piece;
 }
 
 /** 文本增量 → 立刻推给 onDelta（这是"真·流式"的核心） */
@@ -355,12 +387,17 @@ function appendToolCallDeltas(
 // ------------------------------------------------------------
 function buildStreamMessage(params: {
   textBuffer: string;
+  reasoningBuffer: string;
   toolCallsAcc: Map<number, { id?: string; name?: string; args: string }>;
   finishReason: string | undefined;
   usage: Usage | undefined;
+  origin: { baseUrl: string; model: string };
 }): AssistantMessage {
-  const { textBuffer, toolCallsAcc, finishReason, usage } = params;
+  const { textBuffer, reasoningBuffer, toolCallsAcc, finishReason, usage } =
+    params;
   const content: AssistantMessage["content"] = [];
+  // 思考块排在最前：先想后答是事实顺序，前端/回传都依赖它
+  pushReasoningBlock(content, reasoningBuffer);
   if (textBuffer.length > 0) {
     content.push(text(textBuffer));
   }
@@ -384,6 +421,7 @@ function buildStreamMessage(params: {
     // include_usage 拿到真实用量；供应商不支持时拿不到，回退 0
     usage: usage ?? EMPTY_USAGE,
     timestamp: Date.now(),
+    origin: params.origin,
   };
 }
 
@@ -407,9 +445,37 @@ function toUsage(u: {
 // 与上面 assistant 的 tool_calls[].id 对齐。丢了 id，模型就不知道
 // 这个工具结果对应哪一次调用。
 // ------------------------------------------------------------
+/**
+ * 历史里的思考要不要回传给 API（C58）。
+ *
+ * 三条规则，都不需要猜：
+ *   没有 origin（老数据 / MockModel）  → 不回传（保守：不知道产地就别回放）
+ *   origin ≠ 本次请求 (baseUrl, model) → 不回传（换模型了，旧思考不再有效）
+ *   origin == 本次请求                 → 回传
+ *
+ * 为什么必须按产地而不是"一律回传/一律不回传"：
+ *   官方文档要求带 tools 的请求回传 `reasoning_content`（否则 400），但我们实测
+ *   这个端点宽松。宽松是运气不是契约 —— 换到网关端点后，不回传会**静默**变味
+ *   （DSH 那条"网关靠哈希恢复签名"的坑），这类错一个月才发现且无法归因。
+ */
+function replayableReasoning(
+  message: AgentMessage,
+  current: { baseUrl: string; model: string },
+): string | undefined {
+  if (message.role !== "assistant" || message.origin === undefined) {
+    return undefined;
+  }
+  if (message.origin.baseUrl !== current.baseUrl) return undefined;
+  if (message.origin.model !== current.model) return undefined;
+
+  const block = message.content.find((b) => b.type === "reasoning");
+  return block?.text;
+}
+
 function toOpenAiMessages(
   systemPrompt: string,
   messages: AgentMessage[],
+  currentOrigin: { baseUrl: string; model: string },
 ): OpenAiMessage[] {
   const result: OpenAiMessage[] = [{ role: "system", content: systemPrompt }];
 
@@ -437,10 +503,14 @@ function toOpenAiMessages(
         (block): block is ToolCallContent => block.type === "toolCall",
       );
 
+      const reasoning = replayableReasoning(message, currentOrigin);
+
       result.push({
         role: "assistant",
         // OpenAI 要求 content 为 string 或 null；纯工具调用消息给 null
         content: plainText.length > 0 ? plainText : null,
+        // 思考只在"同一产地"时回传（见 replayableReasoning）
+        ...(reasoning === undefined ? {} : { reasoning_content: reasoning }),
         // 工具调用
         ...(toolCalls.length > 0
           ? {
@@ -487,7 +557,10 @@ function toOpenAiTools(tools: ToolDefinition[]): OpenAiTool[] {
 // ------------------------------------------------------------
 // 出模型后：OpenAI response → AssistantMessage（非流式用）
 // ------------------------------------------------------------
-function toTeachingAssistantMessage(data: OpenAiResponse): AssistantMessage {
+function toTeachingAssistantMessage(
+  data: OpenAiResponse,
+  origin: { baseUrl: string; model: string },
+): AssistantMessage {
   const choice = data.choices?.[0];
   const message = choice?.message;
   const finishReason = choice?.finish_reason;
@@ -502,6 +575,8 @@ function toTeachingAssistantMessage(data: OpenAiResponse): AssistantMessage {
   );
 
   const content: AssistantMessage["content"] = [];
+
+  pushReasoningBlock(content, message?.reasoning_content);
 
   if (message?.content) {
     content.push(text(message.content));
@@ -521,6 +596,7 @@ function toTeachingAssistantMessage(data: OpenAiResponse): AssistantMessage {
     stopReason: stopReasonFor(finishReason, toolCalls.length),
     usage,
     timestamp: Date.now(),
+    origin,
   };
 }
 
@@ -541,8 +617,31 @@ function stopReasonFor(
 /** 内容为空时补占位文本，避免发出空消息 */
 function withFallbackText(
   content: AssistantMessage["content"],
+  fallback: string = FALLBACK_TEXT,
 ): AssistantMessage["content"] {
-  return content.length > 0 ? content : [text(FALLBACK_TEXT)];
+  return content.length > 0 ? content : [text(fallback)];
+}
+
+/**
+ * 把思考文本变成内容块（永远放在最前）。
+ * 纯空白的思考不产出块 —— 上游偶尔会发一个只有换行的 `reasoning_content`，
+ * 造一个空块会让界面多出一行空气泡（DSH 也是这个判据：`\u00a0` 之类都算空）。
+ */
+function pushReasoningBlock(
+  content: AssistantMessage["content"],
+  reasoning: string | null | undefined,
+): void {
+  if (reasoning === null || reasoning === undefined) return;
+  if (reasoning.trim().length === 0) return;
+  content.push({ type: "reasoning", text: reasoning });
+}
+
+/** 中止时的内容：已收到的思考 + 正文；两者都没有才给占位文案 */
+function abortedContent(acc: StreamAccumulator): AssistantMessage["content"] {
+  const content: AssistantMessage["content"] = [];
+  pushReasoningBlock(content, acc.reasoningBuffer);
+  if (acc.textBuffer.length > 0) content.push(text(acc.textBuffer));
+  return withFallbackText(content, "（请求已中止）");
 }
 
 // ------------------------------------------------------------
@@ -650,6 +749,12 @@ type OpenAiMessage =
   | {
       role: "assistant";
       content: string | null;
+      /**
+       * 思考内容的**原生字段**（不是塞进 content）。DeepSeek 的思考模式要求
+       * 带 tools 的请求把历史思考按这个字段回传；塞进 content 会被模型当成
+       * "自己说过的话"，行为就变了。
+       */
+      reasoning_content?: string;
       tool_calls?: OpenAiToolCall[];
     };
 
@@ -673,6 +778,8 @@ type OpenAiResponse = {
     message?: {
       role: "assistant";
       content?: string | null;
+      /** 非流式时思考在同级字段里（思考模式下与 content 平级） */
+      reasoning_content?: string | null;
       tool_calls?: OpenAiToolCall[];
     };
     finish_reason?: string;
@@ -688,6 +795,8 @@ type OpenAiChunk = {
   choices?: Array<{
     delta?: {
       content?: string | null;
+      /** 思考增量：思考模式下与 content 平级，先于正文到达 */
+      reasoning_content?: string | null;
       tool_calls?: Array<{
         index: number;
         id?: string;
