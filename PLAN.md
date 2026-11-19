@@ -210,7 +210,7 @@
 | C11 | complete_step 证据签收 | Reasonix complete_step | — | — | 未开始 |
 | C25 | **多模型支持**（2026-09-14 目的变更后**从「暂缓」翻为「要做」**）：接第二家 provider，**验证 `TeachingModel` 接缝真的能换** | pi `packages/ai`（pi-ai 包，多 provider 抽象）；我们的 `config.provider` + `TeachingModel` 接缝已留（A5 的两次调用已证明端点可分开） | `doc/plan/c25-multi-provider.md`（材料已归位 · 未定案） | — | 未开始 |
 | C26 | **交互式 TTY 终端**（pty：能跑 `vim` / `top` / 交互式命令）。⚠️ **Windows 上是难点**（ConPTY） | pi / DSH 的终端面板；对照我们的 `BashRunner`（一次性 spawn + 流式，**无 pty**） | `doc/plan/c26-tty-terminal.md`（材料已归位 · 未定案） | — | 未开始 |
-| C40 | **思考过程渲染（`reasoning_content`）**：适配器**完全没捕获** ⇒ 推理模型的思考既不进上下文、也上不了界面 | 参考项目怎么渲染 reasoning：**待侦察**（DSH / pi / opencode，**尚未读过，别当已有依据**） | `doc/plan/c40-reasoning-render.md`（材料已归位 · 未定案） | — | 未开始 |
+| C40 | **思考过程渲染（`reasoning_content`）**：适配器**完全没捕获** ⇒ 推理模型的思考既不进上下文、也上不了界面 —— ⚠️ **与 C58 是同一件事**，已由 C58 交付（2026-11-19） | 参考项目怎么渲染 reasoning：**待侦察**（DSH / pi / opencode，**尚未读过，别当已有依据**） | `doc/plan/c40-reasoning-render.md`（材料已归位 · **已被 C58 吸收**，见该文件末尾补记） | — | 已交付 |
 
 #### 7.3.3 工程优化待办（**可选** —— 想做就挑，按成本）
 
