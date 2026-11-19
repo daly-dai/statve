@@ -154,6 +154,15 @@ export function WorkspaceGroup({
               // 动作区不参与"整行点击"：点 ＋ / ⋯ 不能顺手把组收起
               onClick={(event) => event.stopPropagation()}
             >
+              {/* 顺序 2026-11-19 用户定：⋯ 在左、＋ 贴最右。
+                  理由：动作区贴着右边缘，常用的「新建会话」放最外侧 —— 鼠标从屏幕右边
+                  进来时不用先跨过 ⋯；而 ⋯ 低频、且里面有「删除」，退到内侧更稳。 */}
+              <Menu
+                label={`${title} 的工作空间操作`}
+                items={menuItems}
+                align="end"
+                className={styles.menuWrap}
+              />
               <button
                 className={styles.iconButton}
                 type="button"
@@ -163,12 +172,6 @@ export function WorkspaceGroup({
               >
                 <PlusIcon />
               </button>
-              <Menu
-                label={`${title} 的工作空间操作`}
-                items={menuItems}
-                align="end"
-                className={styles.menuWrap}
-              />
             </span>
           </>
         )}

@@ -645,7 +645,7 @@ export default function Home() {
 // 而这两句就是常量，跟组件状态无关。
 function composerPlaceholder(hasSession: boolean): string {
   return hasSession
-    ? "给它一个目标，例如：读取 agent-notes.md 并总结要点"
+    ? "描述你想要构建的内容，/调用指令"
     : "先在工作空间里开一个会话，再给它目标";
 }
 
