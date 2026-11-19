@@ -131,3 +131,33 @@ properties: {
 **技术上不缺**（三格齐：依据 = §三 的 pi 一手行号；设计 = §四；验收 = §五）。
 
 **流程上缺一步**：它还没进迭代。用户 2026-11-18 定「**先入池并补详案**」，所以现在停在这里 —— 池子那一行状态是 `未开始`，代码一行没动。
+
+### 七、2026-11-19 实施记录（C60 落地）
+
+**commit `1af3433`**（分支 `feat/c60-read-file-range`，合回 `main` 时是 no-ff 合并提交）。落点：
+`lib/tools/read/window/index.ts`（新，纯逻辑）+ `lib/tools/read/index.ts`（改写）+ 两份 `index.test.ts`
++ `lib/tools/bash/index.ts` 的 `guidelines` 加第四条。
+
+**三处刻意不照抄 pi**（每处都有原因，不是记不住）：
+
+| 处 | pi 怎么做 | 我们怎么做 | 为什么 |
+|---|---|---|---|
+| 行数 | 两套：切片按 `\n` 切（末尾带换行的文件得 186），计数又去掉末尾空行（185） | 一个 `splitLines` 出两种数 | pi 那两个数可能对不上（`A-B` 用的是切片的、`of N` 用的是计数的）；同源就不会对不上 |
+| 提示措辞 | `(50.0KB limit)`（`formatSize` 给一位小数） | `(50KB limit)` | 与本文 §四④ 的措辞一致 |
+| 单行超限兜底 | `sed -n 'Np' 文件 \| head -c …` | `Get-Content '<路径>' -TotalCount N \| Select-Object -Last 1 \| ForEach-Object { $_.Substring(0,2000) }` | 我们的 `bash` 跑的是 PowerShell，`sed` 那条命令**必然失败** |
+
+**补了两个 pi 没写、但省略会出问题的边界**：① `offset` 非整数 / 小于 1 → 收敛成 1（不另造错误分支）② 空文件 → 空正文、不报错（0 行的文件问第 1 行不是错误）。
+
+**真机读数（2026-11-19 11:38，同一工作空间 `E:\codeRead\zustand`）**：
+
+| | 11-18（改前） | 11-19（改后） |
+|---|---|---|
+| `bash` 调用（每次都弹框） | **6** | **0** |
+| `read_file` 调用 | 4 | **14**（每文件一次） |
+| `vanilla.ts`（185 行） | 只给前 61 行（33%） | `startLine:1 / endLine:185 / totalLines:185`（整份） |
+
+`limit` 被真的用过一次：`src/middleware/persist.ts`（402 行）那次是 `{"limit":120}`，拿到 `[281 more lines in file. Use offset=121 to continue.]` 后没续读 —— 那个任务是扫一遍找亮点，够了。**`offset` 一次没用**（如实记录：本任务不需要钻深，不是提示没生效）。
+
+**一个不该误读的观察**：轨迹里 5 条一模一样的续读提示不是读了 5 次，是 `message_update` 每次把累积消息整份重存 —— 这正是池子 **C21**（轨迹瘦身）要治的毛病。
+
+**验收对号（§五 五条 + 真机回归）**：①②③④⑤ 见 `lib/tools/read/index.test.ts` 的 10 条与 `window/index.test.ts` 的 12 条；真机回归如上表。
