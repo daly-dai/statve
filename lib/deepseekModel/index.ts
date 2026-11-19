@@ -209,6 +209,7 @@ export class DeepSeekModel implements TeachingModel {
       reasoningBuffer: "",
       toolCalls: new Map(),
       onDelta: input.onDelta,
+      onReasoningDelta: input.onReasoningDelta,
     };
 
     let buffer = "";
@@ -299,6 +300,8 @@ type StreamAccumulator = {
   usage?: Usage;
   /** 文本增量回调：这是"真·流式"的核心 */
   onDelta?: (delta: string) => void;
+  /** 思考增量回调（C58）：与文本分开的两条通道 */
+  onReasoningDelta?: (delta: string, contentIndex: number) => void;
 };
 
 /**
@@ -346,7 +349,7 @@ function consumeSseChunk(
   appendToolCallDeltas(delta.tool_calls ?? [], acc);
 }
 
-/** 思考增量 → 累积（P1 只存；实时回调在 P3 接） */
+/** 思考增量 → 累积 + 立刻推给 onReasoningDelta（P3 之后界面边跑边能看到） */
 function appendReasoningDelta(
   delta: OpenAiDelta,
   acc: StreamAccumulator,
@@ -354,6 +357,9 @@ function appendReasoningDelta(
   const piece = delta.reasoning_content;
   if (typeof piece !== "string" || piece.length === 0) return;
   acc.reasoningBuffer += piece;
+  // contentIndex 恒为 0：一条消息里思考永远是最前面那一块（DeepSeek 的流里
+  // 思考只出现在正文/工具调用之前）。等 C66 做块级协议时才可能出现交错。
+  acc.onReasoningDelta?.(piece, 0);
 }
 
 /** 文本增量 → 立刻推给 onDelta（这是"真·流式"的核心） */

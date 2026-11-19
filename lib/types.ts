@@ -135,7 +135,7 @@ export type ToolResult = {
   terminate?: boolean;
 };
 
-// --- Agent 事件（12 种事件类型，前端逐条展示） ---
+// --- Agent 事件（13 种事件类型，前端逐条展示） ---
 
 export type AgentEvent =
   | { type: "agent_start" }
@@ -149,6 +149,21 @@ export type AgentEvent =
     }
   | { type: "message_start"; message: AgentMessage }
   | { type: "message_update"; message: AssistantMessage; delta: string }
+  /**
+   * 思考的逐段增量（C58 P3，2026-11-19）。
+   *
+   * 为什么单独一种事件而不是给 `message_update` 加 `channel` 字段：现有所有消费者
+   * （`run-fold` / `trace-fold` / `trace-steps` / 若干测试 + 前端）都在消费
+   * `message_update.delta`，加字段意味着每一处都要判，漏一处就把思考当正文渲染。
+   * 新事件是**加法**：不认识它的消费者只会把它归进时间线（`observed`），不会误渲染。
+   */
+  | {
+      type: "reasoning_update";
+      message: AssistantMessage;
+      /** 这段增量落在 content 的第几块（现在恒为 0；见 lib/model.ts 的说明） */
+      contentIndex: number;
+      delta: string;
+    }
   | { type: "message_end"; message: AgentMessage }
   | {
       type: "tool_execution_start";

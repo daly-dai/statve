@@ -498,6 +498,33 @@ describe("思考 —— 解析与组装（C58 P1）", () => {
     expect(messageText(msg)).toBe("答");
   });
 
+  it("流式：onReasoningDelta 收到逐段思考（contentIndex 恒 0）", async () => {
+    stubFetch(() =>
+      sseResponse([
+        'data: {"choices":[{"delta":{"reasoning_content":"先"}}]}\n\n',
+        'data: {"choices":[{"delta":{"reasoning_content":"想"}}]}\n\n',
+        'data: {"choices":[{"delta":{"content":"答"}}]}\n\n',
+        "data: [DONE]\n\n",
+      ]),
+    );
+
+    const pieces: Array<[string, number]> = [];
+    await makeModel().complete({
+      systemPrompt: "sp",
+      messages: [createUserMessage("hi")],
+      tools: [],
+      onDelta: () => {},
+      onReasoningDelta: (delta, contentIndex) => {
+        pieces.push([delta, contentIndex]);
+      },
+    });
+
+    expect(pieces).toEqual([
+      ["先", 0],
+      ["想", 0],
+    ]);
+  });
+
   it("非流式：message.reasoning_content 也变成块", async () => {
     stubFetch(() =>
       jsonResponse({

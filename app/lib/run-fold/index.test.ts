@@ -21,6 +21,7 @@ import {
   deriveRunPhase,
   foldRunFrame,
   freshRun,
+  type RunState,
 } from ".";
 
 // ---- 测试助手：造消息 / 造帧 ----
@@ -402,5 +403,96 @@ describe("applyHistory / applyCommandResult —— 冷会话恢复与命令回�
       feedback: "没有可压缩的历史",
     });
     expect(next.commandFeedback).toBe("没有可压缩的历史");
+  });
+});
+
+// ---------- C58 P3：思考增量怎么折进消息 ----------
+
+describe("思考增量折叠（C58 P3）", () => {
+  /** 引擎先发的占位消息：空 text 块 */
+  function placeholder(): AssistantMessage {
+    return {
+      role: "assistant",
+      content: [{ type: "text", text: "" }],
+      stopReason: "stop",
+      usage: { input: 0, output: 0, totalTokens: 0 },
+      timestamp: 1,
+    };
+  }
+
+  function runStateWith(message: AssistantMessage): RunState {
+    return { ...EMPTY_RUN, messages: [message] };
+  }
+
+  it("第一段思考插在占位正文之前（先想后答，不能 push 到末尾）", () => {
+    const state = foldRunFrame(
+      runStateWith(placeholder()),
+      {
+        type: "event",
+        event: {
+          type: "reasoning_update",
+          message: placeholder(),
+          contentIndex: 0,
+          delta: "先想",
+        },
+      },
+      1,
+    );
+
+    const content = (state.messages[0] as AssistantMessage).content;
+    expect(content.map((b) => b.type)).toEqual(["reasoning", "text"]);
+  });
+
+  it("后续增量追加到同一块（不会每段新开一块）", () => {
+    const first = foldRunFrame(
+      runStateWith(placeholder()),
+      {
+        type: "event",
+        event: {
+          type: "reasoning_update",
+          message: placeholder(),
+          contentIndex: 0,
+          delta: "先",
+        },
+      },
+      1,
+    );
+    const second = foldRunFrame(
+      first,
+      {
+        type: "event",
+        event: {
+          type: "reasoning_update",
+          message: placeholder(),
+          contentIndex: 0,
+          delta: "想",
+        },
+      },
+      2,
+    );
+
+    const content = (second.messages[0] as AssistantMessage).content;
+    expect(content).toHaveLength(2);
+    expect(content[0]).toMatchObject({ type: "reasoning", text: "先想" });
+  });
+
+  it("contentIndex 越界时贴边插，不造空洞", () => {
+    const state = foldRunFrame(
+      runStateWith(placeholder()),
+      {
+        type: "event",
+        event: {
+          type: "reasoning_update",
+          message: placeholder(),
+          contentIndex: 99,
+          delta: "想",
+        },
+      },
+      1,
+    );
+
+    const content = (state.messages[0] as AssistantMessage).content;
+    expect(content).toHaveLength(2);
+    expect(content.some((b) => b.type === "reasoning")).toBe(true);
   });
 });
