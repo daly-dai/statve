@@ -306,6 +306,16 @@ export function useCommandMenu({
   };
 }
 
+/**
+ * hook 返回的那一整套值（2026-11-19 加）。
+ *
+ * 为什么导出这个类型：`<Composer>` 要把整套接线原样收下来（14 个字段，
+ * 逐个列成 props 只会更长），所以 props 里写 `command: CommandMenuState`。
+ * 用 `ReturnType` 而不是手写一遍：手写就和 hook 会漂移 —— 加一个字段忘了同步，
+ * 类型不会报错，运行时是 undefined。
+ */
+export type CommandMenuState = ReturnType<typeof useCommandMenu>;
+
 /** 按名字或别名找一条（快照里主名唯一；别名只认不显 ← codex ALIAS_COMMANDS） */
 function lookupCommand(
   commands: CommandDescriptor[],

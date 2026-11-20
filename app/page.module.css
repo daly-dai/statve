@@ -4,8 +4,18 @@
    ============================================================
    骨架（.app/.deck 三列布局）留在全局 globals.css——
    它是整页的外壳，不属于任何单个组件。
-   这里只管：对话面容器（stage/transcript/reel）+
-   指令台（console 系列）+ 错误横幅（alarm 系列）。
+   这里只管**页面自己拥有的三块**：左右两栏 + 舞台栅格（.stage 的行模板与
+   空态规则）+ 决策区 + 错误横幅。
+
+   ⚠️ 2026-11-19 拆过一刀：原来这里还管 tab 条、空态品牌行、转录稿滚动容器、
+   指令台（卡片/工具栏/底栏读数）。它们现在跟着各自的组件走：
+     tab 条        → app/components/stage-tabs/index.module.css
+     品牌行        → app/components/empty-hero/index.module.css
+     转录稿 + 吸底 → app/components/transcript-pane/index.module.css
+     指令台        → app/components/composer/index.module.css
+   留在本文件的规则有一条硬约束：**只能用属性选择器指向已经搬走的元素**
+   （`[data-role="transcript"]`、`[data-empty]` 这类），不能再用它们的 class 名
+   —— CSS Modules 会给每个文件的 class 加哈希，跨文件写 `.transcript` 指不到。
    ============================================================ */
 
 /* ---- 左栏：品牌行 + 工作空间栏（2026-11-17） ----
@@ -22,7 +32,7 @@
 
 /* ---- 右栏第一行「会话标题 + 模型名」已拆成组件：见 app/components/session-bar/ ---- */
 
-/* ---- 对话面（转录稿） ---- */
+/* ---- 舞台：右栏的栅格（标题行 / tab 条 / 内容面 / 任务面板 / 错误 / 决策区） ---- */
 /* A3：第一行是 tab 条（对话 / 轨迹），第二行才是可换的内容面。
    原来只有两行（内容 + 指令台），加 tab 条后必须显式写 auto，
    否则 tab 条会落进 1fr 那一行、把内容面挤成 auto。
@@ -41,29 +51,16 @@
   container-type: inline-size;
   /* 右栏的「阅读列宽」（2026-11-18 用户定：70% + 最低 720px + 居中）
      = 右栏宽度的 70%，但不少于 720px；窗口窄到放不下时退化成"右栏宽 − 64px"，
-     永远给两侧留 32px、永不横向溢出。 */
+     永远给两侧留 32px、永不横向溢出。
+     ⚠️ 这条变量被拆出去的三个组件继承使用（转录稿列、输入框卡片、空态品牌行），
+     所以它必须留在 .stage 上，别搬走。 */
   --col: min(calc(100cqw - 64px), max(720px, 70cqw));
 }
 
-/* ---- 顶部 tab（A3 + 2026-11-17 收成 32px）：1fr 槽位按 tab 换内容，
-   指令台永远在最下面 ---- */
-.tabs {
-  display: flex;
-  align-items: flex-end;
-  gap: 18px;
-  height: 32px;
-  padding: 0 20px;
-  border-bottom: 1px solid var(--line-soft);
-}
-
 /* 新会话（一条消息都没有）：**不显示 tab**（2026-11-17 用户定）。
-   ⚠️ 用 display:none 会把 tab 从栅格里**整个移除**，后面的行全部前移
-   （实测：转录区被挤成 38px、下面空一大截）。所以隐藏时把 stage 的行模板
-   一起换掉 —— 少一行，剩下的按「标题行 / 内容」两行排。 */
-.tabs[data-hidden] {
-  display: none;
-}
-
+   ⚠️ tab 条自己是 display:none（见 stage-tabs 的模块样式），但那会让它从
+   栅格里**整个移除**、后面的行全部前移（实测：转录区被挤成 38px、下面空一大截）。
+   所以隐藏时把 stage 的行模板一起换掉 —— 少一行，剩下的按「标题行 / 内容」两行排。 */
 .stage[data-tabs="none"] {
   grid-template-rows: auto minmax(0, 1fr);
 }
@@ -76,11 +73,15 @@
   grid-template-rows: auto minmax(0, 1fr);
 }
 
-/* 空态没有转录稿可看：把它从栅格里拿掉（行模板同时换掉，不会有"错一行"） */
+/* 空态没有转录稿可看：把它从栅格里拿掉（行模板同时换掉，不会有"错一行"）。
+   ⚠️ 用属性选择器而不是 .transcript：那个 class 已经随组件搬走了。 */
 .stage[data-empty] > [data-role="transcript"] {
   display: none;
 }
 
+/* 输入台容器：hero + 指令台的宿主。class 留在页面这边，因为
+   `.stage[data-empty] > .composerArea` 是**舞台的规则**（谁在栅格里哪一行），
+   不是指令台自己的样子。 */
 .composerArea {
   display: flex;
   flex-direction: column;
@@ -99,133 +100,15 @@
   align-self: center;
 }
 
-/* 空态的品牌行：只在空会话出现，位置在输入框卡片上方居中 */
-.hero {
-  display: flex;
-  justify-content: center;
-  width: var(--col); /* 与输入框卡片同列 */
-  margin: 0 auto;
-  padding: 0 0 18px;
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.brandMark {
-  width: 26px;
-  height: 26px;
-  display: grid;
-  place-items: center;
-  border-radius: 7px;
-  background: var(--ink);
-  color: var(--plate);
-  font-family: var(--font-mono);
-  font-size: 14px;
-  line-height: 1;
-}
-
-.brandName {
-  font-family: var(--font-sans);
-  font-size: 20px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  color: var(--ink);
-}
-
-.tab {
-  height: 32px;
-  padding: 0;
-  border: 0;
-  border-bottom: 1.5px solid transparent;
-  background: none;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  color: var(--ink-faint);
-  cursor: pointer;
-}
-
-.tab:hover {
-  color: var(--ink);
-}
-
-.tabOn {
-  color: var(--ink);
-  border-bottom-color: var(--ink);
-}
-
-.transcript {
-  overflow-y: auto;
-  min-height: 0;
-  /* 左右不留内边距：列宽由 .reel 用 --col 自己算（见 .stage 的注释）。
-     ⚠️ 滚动条两侧都预留（both-edges）：否则滚动条一出现，内容盒窄 9px，
-     转录稿列会比输入框列**左移 4.5px**——两条列本该同轴（2026-11-18 实测）。 */
-  padding: 32px 0 6px;
-  scrollbar-gutter: stable both-edges;
-  scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
-}
-
-.transcript::-webkit-scrollbar {
-  width: 9px;
-}
-
-.transcript::-webkit-scrollbar-thumb {
-  background: var(--line);
-  border: 3px solid transparent;
-  background-clip: content-box;
-  border-radius: 99px;
-}
-
-.reel {
-  /* 阅读列：右栏宽的 60%，最低 720px，居中（见 .stage 的 --col 注释） */
-  width: var(--col);
-  margin: 0 auto;
-}
-
-/* ---- 上下文压缩提示（B2） ---- */
-/* 后端在压缩（调模型生成摘要）时给用户的反馈条，跟消息同列宽（它已经在 .reel 里了，
-   所以 100% 即列宽，不要再套一层 --col） */
-.compacting {
-  margin: 10px auto 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--ink-faint);
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-}
-
-.compactingLabel {
-  color: var(--pen-signal);
-}
-
 /* ---- 任务面板容器（Phase 5） ---- */
 /* 与指令台同列：容器不留左右内边距，面板自己用 --col 收进阅读列 */
 .todoBar {
   padding: 0;
 }
 
-/* ---- 审批模式切换条（B1-②） ---- */
-/* 与 todoBar 同列宽，右对齐（输入台区域的操作控件靠右）。
-   ⚠️ 这里必须自己把内容收进 880 列——`padding: 0 32px` + 全宽**不再等价于** 880 居中：
-   A3 之前中间列内宽 728px，`max-width: 880` 从来没生效过，所以两种写法看起来一样；
-   去掉右侧轨迹栏后中间列变宽（>880），有约束的行重新居中、没约束的行贴边，
-   审批按钮就会比输入框多探出一截（2026-09-14 用户抓到的）。
-   用 padding 算，而不是 max-width：box-sizing: border-box 下 max-width:880 会连
-   padding 一起算，内容只剩 816，反而差 64px。 */
-.modeBar {
-  padding: 0 32px 6px; /* 2026-09-16：列宽跟壳后，max(32px, …) 这套手工居中不再需要 */
-  display: flex;
-  justify-content: flex-end;
-}
-
 /* ---- 底部决策区容器（模型提问卡 A4 / 工具审批卡 B1 共用）----
    "模型需要你"时输入框隐藏，卡片占据输入框的位置（askUser 同款）。
-   与 todoBar/console 同列：外层 32px padding，卡片内部 880 居中。 */
+   与 todoBar/指令台同列：外层不留内边距，卡片内部用 --col 收进阅读列。 */
 .decisionBar {
   /* 卡片自己用 --col 收进阅读列（2026-11-18），容器不留左右内边距 */
   padding: 0 0 8px;
@@ -233,191 +116,10 @@
 
 /* B17④：决策区宿主 = 卡片（文档流占位）与常驻输入框的定位容器。
    卡片出现时卡片独占决策区高度（视觉与 B17④ 前完全一致）；无卡片时
-   高度由 console 撑起。consoleCovered 的 absolute 定位上下文在这里。 */
+   高度由指令台撑起。composer 的 `.consoleCovered` 的 absolute 定位上下文
+   就是这个元素 —— 拆组件时这条依赖没变（它是 DOM 祖先，不是样式继承）。 */
 .decisionHost {
   position: relative;
-}
-
-/* B17④：审批/提问卡出现时输入框的隐藏态。
-   absolute + visibility:hidden（而非卸载/display:none）：
-   - 不占文档流 → 卡片独占决策区，视觉与改造前等价
-   - DOM/ref 保留 → 卡关闭即恢复（不重建，命令面板/输入状态不丢）
-   visibility 而非 opacity：隐藏的同时不接收点击（卡片可正常操作） */
-.consoleCovered {
-  position: absolute;
-  inset: 0;
-  visibility: hidden;
-}
-
-/* ---- 指令台（输入） ---- */
-.console {
-  /* 左右不留内边距：卡片自己用 --col 收进阅读列（见 .stage 注释） */
-  padding: 8px 0 20px;
-  /* 不加分隔线：指令台与内容面靠留白分开（第五次调整撤掉了这里一条 2px） */
-}
-
-/* 输入框卡片是单列：文本区一层 + 工具栏一层（C57）。原来是两列（文本 | 按钮），
-   按钮跟着眼睛走；现在按钮落在工具栏右端，和审批档位同一行。 */
-.consoleFrame {
-  position: relative; /* C13：命令补全面板 absolute 定位锚点（贴输入框上方） */
-  width: var(--col); /* 与转录稿同一条阅读列 */
-  margin: 0 auto;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  align-items: end;
-  /* ⭐ 2026-11-18：三个间距是**三个数**，各管一件事（用户定 8 / 4 / 6）：
-       ① 文字 → 工具栏           = gap           = 8
-       ② 工具栏 → 卡片下沿        = padding-bottom = 4
-       ③ 卡片下沿 → 底栏读数      = .statusBar 的 margin-top = 6
-     ② 从 11 收到 4：原来卡片下沿到那颗 34px 发送圆还留着 11px，比上面的 8px 还松，
-     整块"底重、上挤"。收完之后卡高 88 → 81，圆是"落"在卡片上的。
-     ⚠️ 代价记在这里：② 取 4 后，键盘 :focus-visible 环离卡片边只剩 2px ——
-     实机上若觉得挤，改 outline-offset 往内画，**不要动间距**。 */
-  gap: 8px;
-  padding: 11px 10px 4px 16px;
-  background: var(--plate);
-  border: 1px solid var(--line-strong); /* 主输入框：唯一允许用结构线的控件 */
-  border-radius: var(--r-lg);
-}
-
-/* C13：命令补全面板的包裹层——不生成盒模型、不占 grid 子项位，
-   让 absolute 的 popup 直接相对 consoleFrame 定位（app/page.tsx） */
-.commandLayer {
-  display: contents;
-}
-
-.consoleFrame:focus-within {
-  border-color: var(--pen-user);
-  box-shadow: 0 0 0 3px rgba(47, 75, 153, 0.1);
-}
-
-/* 输入框卡片顶部左侧的工作空间名（空会话才显示）。
-   **纯文本、不是按钮** —— 位置先占住；以后要能切换，把它换成 button + 菜单，
-   排版不用动。 */
-.wsRow {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding-bottom: 8px;
-  margin-bottom: 2px;
-  border-bottom: 1px solid var(--line-soft);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--ink-mid);
-}
-
-.wsMark {
-  color: var(--ink-faint);
-}
-
-.wsName {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.consoleInput {
-  border: none;
-  background: none;
-  outline: none;
-  resize: none;
-  padding: 6px 0;
-  font-size: 15px; /* V2：14 → 15 */
-  line-height: 1.6;
-  max-height: 140px;
-}
-
-.consoleInput::placeholder {
-  color: var(--ink-faint);
-}
-
-/* 发送：34px 圆形图标按钮（C57 用户定 —— 抄 DSH；文字按钮在没有图标体系时更稳，
-   但我们已经有图标先例了：审批卡的 Y/N 徽标、组头的 ＋/⋯） */
-.consoleSend {
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  background: var(--ink);
-  color: var(--plate);
-  cursor: pointer;
-}
-
-.consoleSend:hover:not(:disabled) {
-  background: var(--ink-hover);
-}
-
-.consoleSend:disabled {
-  background: var(--line-soft);
-  color: var(--ink-faint);
-  cursor: default;
-}
-
-/* 停止按钮：run 进行中发送按钮的「变身」（位置不变，角色切换）。
-   危险操作，用错误色系（与原来的 .btn-stop 同语言）；同样是 34px 圆。 */
-.consoleStop {
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  background: var(--pen-error);
-  color: var(--plate);
-  cursor: pointer;
-}
-
-.consoleStop:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-/* C13：输入台工具栏（C57 起是卡片的第三层，横跨整宽）。
-   左 = 审批档位，右 = 占位圆环 + 发送/停止。 */
-.consoleActions {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-}
-
-.consoleActionsRight {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-/* ---- 输入台底部的状态条 ----
-   A3：会话级统计（轮次/工具/token）原本长在 <TraceRail> 底部，随轨迹栏下线后
-   没地方显示了。参考 DSH 的输入框底栏放这里：左读数、右提示，一行两栏。
-   （DSH 那行还有 tok/s 与缓存命中率——我们没有这两个数据，不编。） */
-.statusBar {
-  width: var(--col); /* 与输入框同列 */
-  /* 2026-11-18 定案：卡片下沿 → 这行读数 = 6px（原 9）。
-     贴着输入台的三个间距一并改过，口径见 .consoleFrame 的注释。 */
-  margin: 6px auto 0;
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  font-family: var(--font-mono);
-  font-size: 12px; /* V2：11 → 12 */
-  letter-spacing: 0.02em;
-  color: var(--ink-faint);
-}
-
-/* 读数比操作提示重要一档：提示看一次就记住了，读数每次都在变 */
-.statusStats {
-  color: var(--ink-mid);
-  white-space: nowrap;
 }
 
 /* ---- 错误横幅 ---- */
@@ -446,10 +148,9 @@
   flex: none;
 }
 
-/* 窄屏：转录稿和指令台收窄内边距（骨架 .deck 的改列在全局媒体查询） */
+/* 窄屏：页面自己拥有的行收窄内边距（骨架 .deck 的改列在全局媒体查询；
+   转录稿与指令台的同名规则跟着它们自己的模块走） */
 @media (max-width: 900px) {
-  .transcript,
-  .console,
   .todoBar {
     padding-left: 16px;
     padding-right: 16px;

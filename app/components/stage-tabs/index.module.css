@@ -1,0 +1,44 @@
+/* ============================================================
+   stage-tabs/index.module.css —— 顶部 tab 条（2026-11-19 从 page.module.css 搬来）
+   ============================================================ */
+
+/* 顶部 tab（A3 + 2026-11-17 收成 32px）：1fr 槽位按 tab 换内容，
+   指令台永远在最下面 */
+.tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 18px;
+  height: 32px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+/* 新会话（一条消息都没有）：**不显示 tab**（2026-11-17 用户定）。
+   ⚠️ 用 display:none 会把 tab 从栅格里**整个移除**，后面的行全部前移
+   （实测：转录区被挤成 38px、下面空一大截）。所以隐藏时把 stage 的行模板
+   一起换掉 —— 那条规则住 app/page.module.css（`.stage[data-tabs="none"]`）。 */
+.tabs[data-hidden] {
+  display: none;
+}
+
+.tab {
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1.5px solid transparent;
+  background: none;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--ink);
+}
+
+.tabOn {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
