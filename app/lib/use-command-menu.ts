@@ -33,6 +33,17 @@ import {
 } from "@/lib/commands/parse";
 import type { CommandDescriptor } from "@/lib/commands";
 import { filterCommands } from "@/app/lib/command-panel";
+import {
+  draftOf,
+  dropDraft,
+  setDraft,
+  type Drafts,
+} from "@/app/lib/draft-store";
+import {
+  eraseDraft,
+  readAllDrafts,
+  writeDraft,
+} from "@/app/lib/draft-store/storage";
 
 type UseCommandMenuOptions = {
   /** 执行命令（use-agent-run 的 runCommand：POST /api/chat/command + 刷新历史） */
@@ -54,7 +65,52 @@ export function useCommandMenu({
   sessionId,
   disabled,
 }: UseCommandMenuOptions) {
-  const [input, setInput] = useState(""); // 输入框内容
+  // ---- 输入内容（C59：按会话存，显示值是派生出来的）----
+  // 以前是 `const [input, setInput] = useState("")` —— 一份跟会话无关的页面级状态，
+  // 于是"在 A 打一半切到 B"那段字会跟着人跑到 B、按发送就发错会话。
+  // 现在：`drafts[sessionId]`，**换会话不需要任何"清空/恢复"的 effect**。
+  // （把不可能的状态变成画不出来的：一份"不属于任何会话的输入"根本不存在了。）
+  const [drafts, setDrafts] = useState<Drafts>({});
+  // ⚠️ 必须包一层 useMemo：直接写 `draftOf(drafts, sessionId)` 会让 React Compiler
+  // 放弃分析整个 hook（它无法确认这个跨模块调用是纯的，而 `input` 又是下面几个
+  // useCallback 的依赖 ⇒ 报一串 "Existing memoization could not be preserved"）。
+  // 实测：内联 `drafts[sessionId] ?? ""` 或包 useMemo 都能过，这里选后者 ——
+  // 保住"取草稿"只有一个实现（那个实现有单测）。
+  const input = useMemo(() => draftOf(drafts, sessionId), [drafts, sessionId]);
+
+  // 挂载后把盘上的草稿一次读进内存 —— 之后切会话再也不用读盘（纯派生）。
+  // ⚠️ 只能用 effect：localStorage 在服务端不存在（Next 对 use client 组件也会预渲染），
+  //    所以首帧渲染不出草稿、读进来后会再渲染一次（草稿"跳出来"一下）。
+  //    改成在 useState 初始化函数里读会撞 hydration 不一致（服务端 HTML 里输入框是空的）。
+  useEffect(() => {
+    // `{ ...盘, ...内存 }`：别覆盖首帧里用户已经敲下的字
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 外部存储（localStorage）只能在客户端读得到，读不到就没有可派生的值；同 use-sessions 的 loading 那处，见池子 C46
+    setDrafts((local) => ({ ...readAllDrafts(), ...local }));
+  }, []);
+
+  /** 写当前会话的草稿：内存 + 盘（空串 = 删键，不留空壳） */
+  const writeInput = useCallback(
+    (next: string) => {
+      setDrafts((state) => setDraft(state, sessionId, next));
+      writeDraft(sessionId, next);
+    },
+    [sessionId],
+  );
+
+  /** 清掉当前会话的草稿（发送成功 / 命令执行完） */
+  const clearInput = useCallback(() => {
+    setDrafts((state) => dropDraft(state, sessionId));
+    eraseDraft(sessionId);
+  }, [sessionId]);
+
+  /**
+   * 会话被删 → 它的草稿一起扔掉（内存 + 盘）。用户 2026-11-17 定的：
+   * 「草稿不给会话保命：没发出去就该删」。注意参数是**被删的那个 id**，不是当前会话。
+   */
+  const forgetDraft = useCallback((id: string) => {
+    setDrafts((state) => dropDraft(state, id));
+    eraseDraft(id);
+  }, []);
   // ---- 命令快照（slashCatalog，Reasonix）：加载一次，按键只过滤 ----
   const [commands, setCommands] = useState<CommandDescriptor[]>([]);
   // 快照是否加载成功：失败/未完成时跳过前端命令校验、直接交后端判
@@ -125,9 +181,9 @@ export function useCommandMenu({
 
   /** 点 chip 的 ×：只摘掉行首那个 `/名字`（+ 紧跟的一个空格），**保留你后面打的要求** */
   const clearArmedSkill = useCallback(() => {
-    setInput((current) => current.replace(/^\/\S+\s?/, ""));
+    writeInput(input.replace(/^\/\S+\s?/, ""));
     inputRef.current?.focus();
-  }, []);
+  }, [input, writeInput]);
 
   /**
    * textarea onChange：更新输入 + 命令形态（/ 开头、行首无空格）弹面板。
@@ -136,12 +192,15 @@ export function useCommandMenu({
    * 不加这条的话，选中技能后输入框是 `/code-review `，你接着打「帮我评审」——
    * 每一个字都会重新弹出一个空面板（名字已经不匹配任何东西了），纯属打扰。
    */
-  const handleInputChange = useCallback((value: string) => {
-    setInput(value);
-    const prefix = value.startsWith("/") ? value.slice(1) : "";
-    setCommandMenuOpen(isSlashCommandLine(value) && !/\s/.test(prefix));
-    setCommandActiveIndex(0);
-  }, []);
+  const handleInputChange = useCallback(
+    (value: string) => {
+      writeInput(value);
+      const prefix = value.startsWith("/") ? value.slice(1) : "";
+      setCommandMenuOpen(isSlashCommandLine(value) && !/\s/.test(prefix));
+      setCommandActiveIndex(0);
+    },
+    [writeInput],
+  );
 
   /** 选中命令：接受参数（/model gpt-4o）→ 填回输入框补参数；
    *  无参数命令（/compact）→ 直接执行（验收：选 /compact → 压缩卡片出现） */
@@ -149,11 +208,11 @@ export function useCommandMenu({
     (command: CommandDescriptor) => {
       setCommandMenuOpen(false);
       if (command.supportsInlineArgs) {
-        setInput(`/${command.name} `);
+        writeInput(`/${command.name} `);
         inputRef.current?.focus();
         return;
       }
-      setInput("");
+      clearInput();
       // /export 门面模式（DSH session-log-export）：命令只校验（handler
       // 不产文件），runCommand 业务成功后触发独立 GET 下载会话 JSONL。
       if (command.name === "export") {
@@ -164,7 +223,7 @@ export function useCommandMenu({
       }
       void onRunCommand(`/${command.name}`);
     },
-    [onRunCommand, sessionId],
+    [onRunCommand, sessionId, writeInput, clearInput],
   );
 
   /** 提交（表单 / 回车都走这里）：命令硬边界校验 + 普通消息回落。
@@ -172,7 +231,7 @@ export function useCommandMenu({
   const submit = useCallback(() => {
     if (!input.trim() || disabled) return;
     const raw = input;
-    setInput("");
+    clearInput();
     setCommandMenuOpen(false);
     if (isSlashCommandLine(raw)) {
       // 先解析：/ 开头但解析不出名字 = 路径（/foo/bar）、只有斜杠（/）、
@@ -229,6 +288,7 @@ export function useCommandMenu({
     onSend,
     onError,
     onRunCommand,
+    clearInput,
   ]);
 
   /** textarea onKeyDown：面板打开时 ↑↓ 移高亮 / Enter 选中 / Esc 关闭；
@@ -288,7 +348,6 @@ export function useCommandMenu({
 
   return {
     input,
-    setInput, // 空态例句（pickSeed）等外部填输入框用
     inputRef,
     commandMenuOpen,
     commandActiveIndex,
@@ -303,6 +362,8 @@ export function useCommandMenu({
     handleBlur,
     pickCommand,
     submit,
+    /** C59：会话被删时把它的草稿一起扔掉（页面在删会话的三条路径上调） */
+    forgetDraft,
   };
 }
 
