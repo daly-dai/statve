@@ -1,0 +1,42 @@
+/* ============================================================
+   empty-hero/index.module.css —— 空会话的品牌行（2026-11-19 从 page.module.css 搬来）
+   ============================================================
+   ⚠️ `--col`（阅读列宽）定义在页面的 `.stage` 上，这里只是**继承使用**。
+   它仍然是 `.stage` 的后代，所以这条依赖不受拆分影响。
+   ============================================================ */
+
+/* 空态的品牌行：只在空会话出现，位置在输入框卡片上方居中 */
+.hero {
+  display: flex;
+  justify-content: center;
+  width: var(--col); /* 与输入框卡片同列 */
+  margin: 0 auto;
+  padding: 0 0 18px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brandMark {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: var(--ink);
+  color: var(--plate);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.brandName {
+  font-family: var(--font-sans);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}

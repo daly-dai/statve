@@ -111,3 +111,64 @@ node scripts/check-size.mjs
 2. 拆 2 → 3 → 1，每步 `tsc` 绿
 3. 跑绿：脚本 0 + 单测绿 + 真机四状态
 4. 收尾：补 `doc/weekly-review/*/00-过程日志.md`、池子改 `已交付`
+
+---
+
+## 八、实施记录（2026-11-20，第一批：只拆页面，没建脚本）
+
+**为什么先拆没建脚本**：用户原话「怎么扯到脚本了 我只是想要优化一下前端代码 比较大的需要拆分」。
+⇒ 第 1 步（先写脚本让它红）**跳过**；判据仍靠人量，这一条如实记下来，别让文档显得比实际做得多。
+
+### 8.1 结果（口径 = 物理行）
+
+| 文件 | 改前 | 改后 |
+|---|---|---|
+| `app/page.tsx` | **727** | **479** |
+| `app/page.module.css` | 458 | **159** |
+| `app/components/composer/index.tsx` + `.module.css` | — | 233 + 199（新） |
+| `app/components/transcript-pane/` | — | 97 + 63（新） |
+| `app/components/stage-tabs/` | — | 67 + 45（新） |
+| `app/components/empty-hero/` | — | 40 + 43（新） |
+
+四刀与 §四 的路线基本一致，**只有第 3 刀换了内容**：原文写的是"`session-head`：标题 + 模型名 + tab"，实际拆成了
+**`transcript-pane`（转录稿 + 吸底跟随）+ `stage-tabs`（tab 条）**，`SessionBar` 保持原样不动 —— 因为它已经能用一句话说清
+（"标题 + 模型名"），再往里塞 tab 就把两件事又合回一件了。§四 那句"session-head"按此作废。
+
+### 8.2 三条硬约束的落地情况
+
+1. **输入框不重挂**：`<Composer>` 在 `Home` 里是**无条件**子节点（`<div className={styles.composerArea}>` 里），
+   空态 ↔ 对话态只换 props。切 tab / 等审批卡 / 切会话，文本区不重建。
+2. **不碰别人的 store**：四个新组件全是 props 收数据。`<Composer>` 连"有没有会话"都不问 —— 它只收 `state.disabled`。
+3. **一行逻辑不搬家**：唯一"语义上动过"的地方记在 8.3 ②。
+
+### 8.3 拆的时候真撞上的四个坑（都是下一个拆的人会再撞的）
+
+1. **CSS Modules 让"跨文件的类名"根本指不到。** `page.module.css` 原来有
+   `.stage[data-empty] > .composerArea` / `> .transcript` 这类**从祖先类选择后代类**的规则；后代搬走之后，
+   那个类名在新文件里被哈希成另一个名字，规则静默失效（不报错、只是布局不对）。
+   ⇒ 解法只有一条：**跨组件边界的钩子改用属性选择器**（`[data-role="transcript"]`、`[data-empty]`），
+   属性不受哈希影响。这条已经写进 `page.module.css` 的头部注释，谁再拆都会先看到。
+2. **"谁在栅格里哪一行"必须留在页面。** `.stage` 的行模板、`.composerArea` / `.decisionHost` 的 `align-self`
+   都是**舞台的规则**，不是组件自己的样子。拆的时候容易顺手把 `.composerArea` 一起搬进 composer —— 搬完就发现
+   页面的 `data-empty` 规则没东西可选中了。判据一句话：**这条规则是在管"它在页面上的位置"还是"它自己长什么样"**。
+3. **布局 effect 的依赖要换对。** 吸底滚动的 effect 原来盯 `[messages, follow]`；搬进 `TranscriptPane` 之后它拿到的是
+   折好的 `turns`（`buildTranscript(messages)` 的产物，`useMemo` 缓存）。**引用变了就等于"有新内容"**，
+   所以依赖改成 `[turns, follow]` 是等价的 —— 但这一条要能说出"为什么等价"，不然就是搬错了还看不出来。
+4. **死 CSS 会被搬走而不被发现。** `.modeBar`（审批模式切换条）在 C57 把档位搬进输入台卡片之后就没人用了，
+   但因为它住在 `page.module.css`，一直没人注意。这次搬样式时靠"声明级对账"（见 8.4）才捞出来，顺手删了 15 行。
+
+### 8.4 怎么证明"是搬家不是改写"（这一节是可以复用的方法）
+
+| 关 | 做法 | 结果 |
+|---|---|---|
+| 样式 | 取 `git show main:app/page.module.css` 的全部 `prop: value` 声明，和新 5 个文件的并集做集合差 | 旧 125 → 新 123；"旧有新无"只有 `.modeBar` 那 2 条；"新有旧无" **0 条**（没发明任何值） |
+| 接线 | 每个 `.tsx` 里的 `styles.X` 引用集合 vs 自己的 `index.module.css` 定义集合，双向查 | 缺失 0、**死样式 0** |
+| 产物 | 起 dev server，抓 SSR HTML 里的 class 哈希 | 四个新组件的哈希**各不相同**，且分别来自各自的模块（证明样式没接错文件） |
+| 编译后 | 抓 CSS chunk 反查被搬走的关键规则（`scrollbar-gutter` / `visibility:hidden` / `--col` / `34px` 圆 …） | 全部命中 |
+
+### 8.5 下一批的候选（现在全仓库 `.tsx` 最大已不是页面）
+
+`app/page.tsx` 479 · **`app/components/transcript/index.tsx` 480** · `app/repos/page.tsx` 458。
+`transcript/index.tsx` 内部已经天然分成 6 块（`ToolRow` 81 行 / `ProcessGroup` 80 / `AnswerActions` 56 / `Transcript` 74 /
+`ReasoningRow` 43 / `StepView` 25），现在拆是零成本；等它长到 550 再拆就得动逻辑了。**脚本 `check-size.mjs` 仍未建**，
+C64 因此停在 `进行中`。

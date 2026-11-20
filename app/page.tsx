@@ -4,60 +4,64 @@
 // 页面 —— statve 的「组装层」
 // ============================================================
 // 它本身不含业务逻辑，只做三件事：
-//   1. 调 useAgentRun() 拿状态和行为（消息、事件、loading、发送、清空）
-//   2. 派生展示数据（phase / turn / rows 三个纯函数）
-//   3. 组合组件（Nameplate / MessageRow / SessionBar / TraceViewer…）
+//   1. 调 hook 拿状态与行为（会话 / 工作空间 / 一次 run / 轨迹 / 输入台）
+//   2. 派生展示数据（groups / turns / workspaceName 三个纯函数或 useMemo）
+//   3. 组合组件并把值传下去
 //
-// 样式：组件样式跟组件走（components/<组件>/<组件>.module.css）；
-// 页面自己的布局（对话面容器 + 指令台 + 错误横幅）在 ./page.module.css；
-// 骨架与设计令牌在 ./globals.css（全局层）。
+// ⚠️ 2026-11-19 拆过一刀（AGENTS 11.9：单文件 ≤ 500 行）。这一页从 727 行
+// 降到下面这些组件的**组装**，四块从它身上搬走，各自独立成组件：
+//   <EmptyHero>       app/components/empty-hero/    空会话的品牌行
+//   <StageTabs>       app/components/stage-tabs/    「对话 / 轨迹」切换条
+//   <Composer>        app/components/composer/      指令台（卡片 + 工具栏 + 底栏读数）
+//   <TranscriptPane>  app/components/transcript-pane/ 转录稿那一格 + 吸底跟随
+// 每一块为什么单独存在、以及拆的时候不能破的约束，都写在各自的文件头注释里。
+//
+// 样式：组件样式跟组件走（components/<组件>/index.module.css）；
+// 页面自己的布局（三列骨架里的左右两栏 + 舞台栅格 + 决策区 + 错误横幅）
+// 在 ./page.module.css；骨架与设计令牌在 ./globals.css（全局层）。
 //
 // ── 调用地图：页面调用的每个东西是什么、在哪、干什么 ──
 //   useSessions()   app/lib/use-sessions.ts
 //                   Phase 2 多会话：会话列表 + 当前会话 id。返回
 //                   { sessions, currentId, select, create, rename, remove }。
 //                   页面把 currentId 传给 useAgentRun —— 切换会话 = 换 id。
+//   useWorkspaces() app/lib/use-workspaces.ts（C49/C51）
+//                   工作空间记录：侧栏的分组依据，也就是"会话属于哪个文件夹"。
 //   useAgentRun()   app/lib/use-agent-run.ts
 //                   run 的全部状态 + 行为。内部封装了 fetch POST /api/chat、
 //                   readStream 逐帧消费、会话历史 GET 恢复。
 //                   返回 { messages, observed, loading, error, runId, model,
-//                          send(text), stats }。
-//                   （2026-08-26：reset 已删——清空会话功能移除，
-//                    见 nameplate 头注释）
+//                          send(text), stats, pendingApproval, pendingAsk, … }。
+//   useCommandMenu() app/lib/use-command-menu.ts（C13）
+//                   输入值 / 命令快照 / 过滤 / 键盘导航 / 提交。
+//                   **整份返回值原样交给 <Composer>**（页面不拆开用）。
 //   useTraces()     app/lib/use-traces.ts（A3）
 //                   拉某个会话的轨迹文件（列表 → 按同序逐个 run）→ foldTrace
 //                   折叠 → buildTraceView 排层次，交给 <TraceViewer> 渲染。
-//                   （旧的 trace-rail + trace-fold 留在仓库作回滚，页面不再渲染）
-//   derivePhase()   本文件底部（纯函数）—— 根据最近一条事件推断状态灯相位
-//   currentTurn()   本文件底部（纯函数）—— 从 turn_start 事件数出当前轮次
-//   <Nameplate>     app/components/nameplate/ —— 页头：标志/标题/run 信息/
-//                   状态灯/清空按钮
+//   <Nameplate>     app/components/nameplate/ —— 左栏品牌行
 //   <SessionList>   app/components/session-list/ —— 左侧会话栏
-//                   （列表 / 新建 / 行内重命名 / 删除）
+//                   （分组 / 新建 / 行内重命名 / 删除 / 工作空间菜单）
 //   <SessionBar>    app/components/session-bar/ —— 右栏第一行：会话标题 + 模型名
-//                   （新会话不显示标题；空会话整行收起）
-//   <MessageRow>    app/components/message-row/ —— 转录稿单条消息
-//                   （用户/Agent 文本/工具调用行/工具结果卡片）
 //   <TraceViewer>   app/components/trace-viewer/ —— 轨迹 tab：竖轴记录表
-//                   （A3；顶部 tab 与它一起把原来的右侧轨迹栏收进了中间）
-//   <ApprovalDialog> app/components/approval-dialog/ —— 写/改/删工具的
-//                   人工确认弹框（允许/拒绝），配合 pendingApproval/approve
+//   <TaskPanel>     app/components/task-panel/ —— 任务清单（模型 todo_write 的只读展示）
+//   <ApprovalDialog> app/components/approval-dialog/ —— 写/改/删工具的人工确认弹框
+//   <AskUserCard>   app/components/ask-user-card/ —— 模型提问卡（A4）
+//   <DirectoryBrowser> app/components/directory-browser/ —— 「新增工作空间」选文件夹
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import styles from "./page.module.css";
 import { Nameplate } from "./components/nameplate";
-import { Transcript } from "./components/transcript";
+import { Composer } from "./components/composer";
+import { EmptyHero } from "./components/empty-hero";
+import { StageTabs, type StageTab } from "./components/stage-tabs";
+import { TranscriptPane } from "./components/transcript-pane";
 import { buildTranscript } from "./lib/transcript";
 import { TraceViewer } from "./components/trace-viewer";
 import { SessionList } from "./components/session-list";
 import { ApprovalDialog } from "./components/approval-dialog";
-import { ApprovalModeMenu } from "./components/approval-mode-menu";
 import { TaskPanel } from "./components/task-panel";
 import { AskUserCard } from "./components/ask-user-card";
-import { CommandMenu } from "./components/command-menu";
-import { SkillChip } from "./components/skill-chip";
-import { ContextMeter } from "./components/context-meter";
 import { useAgentRun } from "./lib/use-agent-run";
 import { useRunStore } from "./lib/run-store";
 import { useMarkSessionRead } from "./lib/use-mark-session-read";
@@ -66,9 +70,7 @@ import { useSessions } from "./lib/use-sessions";
 import { useWorkspaces } from "./lib/use-workspaces";
 import { groupSessions } from "./lib/session-groups";
 import { DirectoryBrowser } from "./components/directory-browser";
-import { useStickyScroll } from "./lib/use-sticky-scroll";
 import { useTraces } from "./lib/use-traces";
-import { formatTokens } from "./lib/format";
 import { SessionBar } from "./components/session-bar";
 import type { ApprovalMode } from "./services/chat/types";
 import { getApprovalMode, setApprovalMode } from "./services/chat";
@@ -76,7 +78,7 @@ import { getApprovalMode, setApprovalMode } from "./services/chat";
 export default function Home() {
   // 会话栏（Phase 2）：列表 + 当前会话 id。currentId 传给 useAgentRun，
   // 切换会话 = 换 currentId，聊天区随之清空并加载对应历史。
-  // refresh 额外用于"run 结束后列表保鲜"（见下方 loading 跳变 effect）
+  // refresh 额外用于"run 结束后列表保鲜"（见下方 commandRunning effect）
   const {
     sessions,
     currentId,
@@ -112,18 +114,15 @@ export default function Home() {
 
   // hook：一次 run 的观测状态和行为。页面从这里拿数据，不再自己发 fetch。
   //   messages  转录稿消息（当前会话历史 + 本次 run 新增）
-  //   observed  带到达时间戳的事件流（右侧时间线的原始素材）
   //   loading   请求进行中（按钮禁用、状态灯判断都用它）
   //   error     请求/流式错误信息（显示在输入框上方横幅）
-  //   runId     本次 run 的唯一 id（铭牌展示，来自 run 帧）
-  //   model     本次用的模型名（铭牌展示）
+  //   runId     本次 run 的唯一 id（停止按钮要用它）
+  //   model     本次用的模型名（标题行展示）
   //   send(text)  发送一次 run：fetch → readStream 逐帧消费 → applyFrame
   //   stats       会话级累计统计（轮次 / 工具 / token 数，服务端从会话文件算出）
-  //               A3 起显示在输入台底栏（原先长在 <TraceRail> 底部）
-  //   pendingApproval  挂起的工具确认（写/改/删弹框用）；approve(allow) 回传决定
+  //   pendingApproval / pendingAsk  挂起的工具确认与模型提问（决策区弹框用）
   //   toolOutputs  bash 命令的实时输出（toolCallId → 文本）；stop(runId) 停止当前 run
   //   todos        任务清单（Phase 5）：模型 todo_write 更新，前端只读展示
-  //   （2026-08-26：reset 已删——清空会话功能移除，见 nameplate 头注释）
   const {
     messages,
     loading,
@@ -152,24 +151,10 @@ export default function Home() {
   const hasSession = Boolean(currentId);
   const composerDisabled = loading || !hasSession;
 
-  // 输入控制台 + 命令面板（C13 拆出）：input 状态/快照/过滤/键盘导航/
-  // pick/submit 的命令分支全在 hook 里，页面只接线（use-command-menu.ts）。
-  const {
-    input,
-    inputRef,
-    commandMenuOpen,
-    commandActiveIndex,
-    setCommandActiveIndex,
-    commandMenuRef,
-    filteredCommands,
-    armedSkill,
-    clearArmedSkill,
-    handleInputChange,
-    handleKeyDown,
-    handleBlur,
-    pickCommand,
-    submit,
-  } = useCommandMenu({
+  // 输入控制台 + 命令面板（C13 拆出 hook，2026-11-19 整份交给 <Composer>）：
+  // input 状态/快照/过滤/键盘导航/pick/submit 的命令分支全在 hook 里，
+  // 页面既不拆开用、也不往下透传单个字段。
+  const command = useCommandMenu({
     onRunCommand: runCommand,
     onSend: send,
     onError: setError,
@@ -210,18 +195,6 @@ export default function Home() {
       });
   }, []);
 
-  const transcriptRef = useRef<HTMLDivElement>(null); // 转录稿容器，新消息到达时滚到底
-
-  // ---- 滚动跟随（吸底）----
-  // 2026-08-26 修：原来每次 messages/observed 更新都强制 scrollToEnd——
-  // 流式每来一个 delta 就把滚动轴拽到底，用户想翻上面的历史做不到。
-  // 现在用 useStickyScroll 判定"用户是否停靠底部"：停靠才自动滚，
-  // 用户滚上去看历史就停止跟随，滚回底部自动恢复（标准聊天 UX）。
-  // 判定逻辑封装在 hook（阈值 48px 也在里面），这里只剩两行组装。
-  // （轨迹那一份跟随随 <TraceRail> 一起搬进了 <TraceViewer>——它自己持有
-  //   滚动容器，自己用同一个 hook，页面不必再管。）
-  const followTranscript = useStickyScroll(transcriptRef);
-
   // 消息 → 回合（纯函数，逐帧重算；messages 引用没变就不重算）
   const turns = useMemo(() => buildTranscript(messages), [messages]);
 
@@ -237,10 +210,6 @@ export default function Home() {
       )?.title,
     [groups, currentId],
   );
-
-  useEffect(() => {
-    if (followTranscript) scrollToEnd(transcriptRef.current);
-  }, [messages, followTranscript]);
 
   // 列表保鲜（2026-08-26 修，2026-09-02 B22 升级）：
   // 会话列表只在 挂载/新建/重命名/删除 时刷新，聊天后不刷 → 停在旧快照：
@@ -272,7 +241,7 @@ export default function Home() {
   // A3：顶部 tab（对话 / 轨迹）。轨迹只在 tab 打开时才拉数据——没打开就
   // 不请求（useTraces 的 enabled）；`live` 让它在本轮 run 进行中轮询，
   // run 一结束 effect 重跑，自动补一次完整加载。
-  const [tab, setTab] = useState<"chat" | "trace">("chat");
+  const [tab, setTab] = useState<StageTab>("chat");
   const traces = useTraces(currentId, {
     enabled: tab === "trace",
     live: loading,
@@ -285,8 +254,11 @@ export default function Home() {
   // 右栏标题行（2026-11-17）：会话标题 + 模型名，规则都在 <SessionBar> 里
   // （新会话不显示标题）。运行状态**不**写在这里 —— 行首那个点表达的是
   // "我还没看见的结局"，而当前会话按规则不点（`app/lib/session-dot`）。
-  // 新会话（一条消息都没有）连 tab 都不显示。
+  // 新会话（一条消息都没有）连 tab / 空态品牌行都不显示。
   const showTabs = hasConversation(sessions, currentId, messages.length);
+  // 空会话：输入台居中 + 提示"先开个会话"（判据和 tab 的显隐是同一个，
+  // 所以只算一次 —— 两个 `!showTabs` 各写各的迟早会漂）
+  const emptyStage = !showTabs;
 
   return (
     <div className="app">
@@ -354,81 +326,21 @@ export default function Home() {
           />
           {/* A3 顶部 tab：对话 / 轨迹。指令台在 .stage 的最后一行，两个 tab
               共用它——切到轨迹也照样能发消息（B17④ 的常驻输入框）。
-              ⚠️ 2026-11-17：**新会话不显示 tab**（没有对话也没有轨迹可看，
-              显示切换器只是噪音）。用 data-hidden 归零而不是不渲染，
-              原因是 .stage 按行排栅格，少一个子元素会让内容整体错一行。 */}
-          <div
-            className={styles.tabs}
-            role="tablist"
-            data-hidden={showTabs ? undefined : ""}
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === "chat"}
-              className={`${styles.tab}${tab === "chat" ? ` ${styles.tabOn}` : ""}`}
-              onClick={() => setTab("chat")}
-            >
-              对话
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === "trace"}
-              className={`${styles.tab}${tab === "trace" ? ` ${styles.tabOn}` : ""}`}
-              onClick={() => setTab("trace")}
-            >
-              轨迹
-            </button>
-          </div>
+              ⚠️ 新会话不显示 tab（没有对话也没有轨迹可看，显示切换器只是噪音）。 */}
+          <StageTabs value={tab} onChange={setTab} hidden={!showTabs} />
 
           {/* 两个 tab 共用同一个 1fr 槽位——所以这里必须二选一。
               代价：切走再回来，转录稿的滚动位置会丢（组件卸载了）。
               一期先接受；要保住就得两个都挂着用 visibility 藏，不值当。 */}
           {tab === "chat" ? (
-            <div
-              className={styles.transcript}
-              ref={transcriptRef}
-              data-role="transcript"
-            >
-              <div className={styles.reel}>
-                {/* C57：转录稿按**回合**渲染（一次对话 = 一个回合），不再一条消息一行。
-                    折叠规则、工具行、最终回答的切法都在 <Transcript> / app/lib/transcript 里；
-                    页面只负责两件事：把消息折成回合（纯函数）、告诉它这一轮还在不在跑。 */}
-                <Transcript
-                  turns={turns}
-                  streaming={loading}
-                  toolOutputs={toolOutputs}
-                  liveSince={liveSince}
-                />
-                {/* 上下文压缩进行中（B2）：后端在调模型生成摘要，给用户明确反馈，
-                  而不是让 transcript 停在原地像卡住 */}
-                {compacting && (
-                  <div className={styles.compacting} role="status">
-                    <span className={styles.compactingLabel}>
-                      上下文超出上限
-                    </span>
-                    <span>正在压缩上下文，请稍候…</span>
-                  </div>
-                )}
-                {/* C13 命令执行状态：渲染在消息流末尾（跟 compacting 同位置），
-                  不叠在输入框上。执行中提示 / 无变化的兜底结果文案
-                  （压缩成功时卡片即反馈，文案为空） */}
-                {commandRunning && (
-                  <div className={styles.compacting} role="status">
-                    <span className={styles.compactingLabel}>命令</span>
-                    <span>正在执行，请稍候…</span>
-                  </div>
-                )}
-                {commandFeedback && (
-                  <div className={styles.compacting} role="status">
-                    <span>{commandFeedback}</span>
-                  </div>
-                )}
-                {/* 待确认卡片（B1-④）已从消息流移到底部决策区（2026-08-26，
-                  用户要求"像 askUser 悬浮在输入框位置"）——见下方 decisionBar */}
-              </div>
-            </div>
+            <TranscriptPane
+              turns={turns}
+              streaming={loading}
+              toolOutputs={toolOutputs}
+              liveSince={liveSince}
+              compacting={compacting}
+              command={{ running: commandRunning, feedback: commandFeedback }}
+            />
           ) : (
             <TraceViewer
               fold={traces.fold}
@@ -436,9 +348,6 @@ export default function Home() {
               loading={traces.loading}
             />
           )}
-
-          {/* 审批模式切换搬进输入台卡片（C57，见 .consoleActions）—— 它属于
-              "发送这次 run 用什么信任档"，跟发送按钮是一组，不再是独立一行。 */}
 
           {/* 任务面板（Phase 5）：钉在输入台上方，与输入框同列宽（830 居中）。
               只读展示（todo 唯一写者是模型）；头部常驻显示进度，展开看明细；
@@ -483,129 +392,20 @@ export default function Home() {
                 CSS，绝不换父级（换父级会重挂 textarea，焦点和没发出去的字一起丢；
                 DSH 在 EmptyHero.tsx 顶部专门写了这条）。 */}
             <div className={styles.composerArea}>
-              {emptyHero(!showTabs)}
-              <form
-                className={`${styles.console}${
-                  pendingApproval || pendingAsk
-                    ? ` ${styles.consoleCovered}`
-                    : ""
-                }`}
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  submit();
+              <EmptyHero visible={emptyStage} />
+              <Composer
+                command={command}
+                approval={{ mode: approvalMode, onChange: switchApprovalMode }}
+                run={{ loading, runId, stop }}
+                stats={stats}
+                contextPressure={contextPressure}
+                empty={{ visible: emptyStage, workspaceName }}
+                state={{
+                  disabled: composerDisabled,
+                  covered: Boolean(pendingApproval) || Boolean(pendingAsk),
+                  hasSession,
                 }}
-              >
-                <div className={styles.consoleFrame}>
-                  {/* 空会话：工作空间落在卡片内部的顶部左侧 —— 纯文本（位置先占住；
-                      以后要能切换，把它换成 button + 菜单，排版不用动） */}
-                  {workspaceRow(!showTabs, workspaceName)}
-                  {/* C13 命令补全面板：贴输入框上方浮起；键盘导航在 textarea
-                    onKeyDown 处理（焦点始终在输入框，只移高亮项）。
-                    display:contents —— 包裹 div 不生成盒模型，不占 consoleFrame
-                    grid 的子项位（否则 popup 会把两列布局撑成两行），
-                    popup 的 absolute 定位祖先仍是 consoleFrame。 */}
-                  {commandMenuOpen && (
-                    <div ref={commandMenuRef} className={styles.commandLayer}>
-                      <CommandMenu
-                        commands={filteredCommands}
-                        activeIndex={commandActiveIndex}
-                        onActiveChange={setCommandActiveIndex}
-                        onPick={pickCommand}
-                      />
-                    </div>
-                  )}
-                  {/* C8 T6 · R4-1：行首挂着一个技能 → 框内上沿一个可点的标签。
-                    放在 textarea **之前**：consoleFrame 是两列 grid，它 grid-column
-                    1/-1、自然落在第一行，textarea 与右侧按钮仍在第二行 */}
-                  {armedSkill && (
-                    <SkillChip
-                      name={armedSkill.name}
-                      onClear={clearArmedSkill}
-                    />
-                  )}
-                  <textarea
-                    className={styles.consoleInput}
-                    ref={inputRef}
-                    rows={1}
-                    value={input}
-                    onChange={(e) => handleInputChange(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    onBlur={handleBlur}
-                    placeholder={composerPlaceholder(hasSession)}
-                    disabled={composerDisabled}
-                    autoFocus
-                  />
-                  {/* 工具栏（三层里的第三层）：左 = 这次 run 用什么信任档，
-                      右 = 占位圆环 + 发送/停止。整行横跨卡片（grid-column 1/-1）。 */}
-                  <div className={styles.consoleActions}>
-                    <ApprovalModeMenu
-                      mode={approvalMode}
-                      onChange={switchApprovalMode}
-                    />
-                    <div className={styles.consoleActionsRight}>
-                      <ContextMeter pressure={contextPressure} />
-                      {/* 发送按钮在 run 进行中「变身」为停止按钮：
-                      位置永远不变（操作跟随视线），角色随 loading 切换。
-                      stop 需要 runId（来自 SSE run 帧），未到时短暂不可点 */}
-                      {loading ? (
-                        <button
-                          className={styles.consoleStop}
-                          type="button"
-                          onClick={() => stop(runId)}
-                          disabled={!runId}
-                          aria-label="停止"
-                          title="停止这次运行"
-                        >
-                          <svg
-                            width="10"
-                            height="10"
-                            viewBox="0 0 10 10"
-                            aria-hidden="true"
-                          >
-                            <rect
-                              width="10"
-                              height="10"
-                              rx="1.5"
-                              fill="currentColor"
-                            />
-                          </svg>
-                        </button>
-                      ) : (
-                        <button
-                          className={styles.consoleSend}
-                          type="submit"
-                          disabled={!input.trim() || !hasSession}
-                          aria-label="发送"
-                          title="发送（Enter）"
-                        >
-                          <svg
-                            width="15"
-                            height="15"
-                            viewBox="0 0 16 16"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="1.8"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            aria-hidden="true"
-                          >
-                            <path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" />
-                          </svg>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                {/* 输入台底栏（A3，参考 DSH）：左 = 会话级读数，右 = 操作提示。
-                  读数原本长在 <TraceRail> 底部，轨迹栏下线后搬到这里——
-                  这样"会话跑了多少"在任何 tab 下都看得见。 */}
-                <div className={styles.statusBar}>
-                  <span className={styles.statusStats}>
-                    {stats.turns} 轮 · {stats.tools} 工具 ·{" "}
-                    {formatTokens(stats.tokens)} token
-                  </span>
-                </div>
-              </form>
+              />
             </div>
           </div>
         </main>
@@ -639,15 +439,7 @@ export default function Home() {
   );
 }
 
-// ============ 输入台文案（纯函数，跟着页面走） ============
-
-// 为什么提到模块层：写进 JSX 的三元会把 Home 的圈复杂度顶到 eslint 上限（20），
-// 而这两句就是常量，跟组件状态无关。
-function composerPlaceholder(hasSession: boolean): string {
-  return hasSession
-    ? "描述你想要构建的内容，/调用指令"
-    : "先在工作空间里开一个会话，再给它目标";
-}
+// ============ 展示数据的推导（纯函数，跟着页面走） ============
 
 /**
  * 会话的显示标签（**和侧栏那一行的标签同一条链**：标题 ?? 首条消息 ?? 空）。
@@ -680,47 +472,7 @@ function hasConversation(
   return Boolean(found?.preview);
 }
 
-// ============ 状态推导（纯函数，跟着页面走） ============
-
-/**
- * 空会话的几个"小零件"。都拆成模块级函数而不是写在 JSX 里 ——
- * 一是 Home 的圈复杂度已经很紧（ESLint complexity ≤ 20），
- * 二是这三样只在空会话出现，放在一起读着更清楚。
- */
-
 /** 空会话才有 `data-empty`（给 CSS 换布局用；undefined 表示不写这个属性） */
 function emptyAttr(hasChat: boolean): string | undefined {
   return hasChat ? undefined : "";
-}
-
-/** 空会话的品牌行：输入框卡片上方居中 */
-function emptyHero(empty: boolean) {
-  if (!empty) return null;
-  return (
-    <div className={styles.hero}>
-      <div className={styles.brand}>
-        <span className={styles.brandMark} aria-hidden="true">
-          s
-        </span>
-        <span className={styles.brandName}>statve</span>
-      </div>
-    </div>
-  );
-}
-
-/** 空会话："这条会话属于哪个工作空间" —— 纯文本，落在输入框卡片内部顶部左侧 */
-function workspaceRow(empty: boolean, name: string | undefined) {
-  if (!empty || name === undefined) return null;
-  return (
-    <div className={styles.wsRow}>
-      <span className={styles.wsMark} aria-hidden="true">
-        ▸
-      </span>
-      <span className={styles.wsName}>{name}</span>
-    </div>
-  );
-}
-
-function scrollToEnd(box: HTMLDivElement | null) {
-  box?.scrollTo(0, box.scrollHeight);
 }

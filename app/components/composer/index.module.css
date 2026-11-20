@@ -1,0 +1,198 @@
+/* ============================================================
+   composer/index.module.css —— 指令台样式（2026-11-19 从 page.module.css 搬来）
+   ============================================================
+   ⚠️ `--col`（阅读列宽）定义在页面级的 `.stage` 上，这里只是**继承使用**。
+   它仍然是 `.stage` 的后代，所以这条依赖不受拆分影响。
+   ⚠️ `.consoleCovered` 的 absolute 定位祖先仍然是页面里的 `.decisionHost`
+      （position:relative）—— 藏起来时"卡片独占决策区"的观感不变。
+   ============================================================ */
+
+/* ---- 指令台（输入） ---- */
+.console {
+  /* 左右不留内边距：卡片自己用 --col 收进阅读列（见 page.module.css 的 .stage 注释） */
+  padding: 8px 0 20px;
+  /* 不加分隔线：指令台与内容面靠留白分开（第五次调整撤掉了这里一条 2px） */
+}
+
+/* B17④：审批/提问卡出现时输入框的隐藏态。
+   absolute + visibility:hidden（而非卸载/display:none）：
+   - 不占文档流 → 卡片独占决策区，视觉与改造前等价
+   - DOM/ref 保留 → 卡关闭即恢复（不重建，命令面板/输入状态不丢）
+   visibility 而非 opacity：隐藏的同时不接收点击（卡片可正常操作） */
+.consoleCovered {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+}
+
+/* 输入框卡片是单列：文本区一层 + 工具栏一层（C57）。原来是两列（文本 | 按钮），
+   按钮跟着眼睛走；现在按钮落在工具栏右端，和审批档位同一行。 */
+.consoleFrame {
+  position: relative; /* C13：命令补全面板 absolute 定位锚点（贴输入框上方） */
+  width: var(--col); /* 与转录稿同一条阅读列 */
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: end;
+  /* ⭐ 2026-11-18：三个间距是**三个数**，各管一件事（用户定 8 / 4 / 6）：
+       ① 文字 → 工具栏           = gap           = 8
+       ② 工具栏 → 卡片下沿        = padding-bottom = 4
+       ③ 卡片下沿 → 底栏读数      = .statusBar 的 margin-top = 6
+     ② 从 11 收到 4：原来卡片下沿到那颗 34px 发送圆还留着 11px，比上面的 8px 还松，
+     整块"底重、上挤"。收完之后卡高 88 → 81，圆是"落"在卡片上的。
+     ⚠️ 代价记在这里：② 取 4 后，键盘 :focus-visible 环离卡片边只剩 2px ——
+     实机上若觉得挤，改 outline-offset 往内画，**不要动间距**。 */
+  gap: 8px;
+  padding: 11px 10px 4px 16px;
+  background: var(--plate);
+  border: 1px solid var(--line-strong); /* 主输入框：唯一允许用结构线的控件 */
+  border-radius: var(--r-lg);
+}
+
+/* C13：命令补全面板的包裹层——不生成盒模型、不占 grid 子项位，
+   让 absolute 的 popup 直接相对 consoleFrame 定位 */
+.commandLayer {
+  display: contents;
+}
+
+.consoleFrame:focus-within {
+  border-color: var(--pen-user);
+  box-shadow: 0 0 0 3px rgba(47, 75, 153, 0.1);
+}
+
+/* 输入框卡片顶部左侧的工作空间名（空会话才显示）。
+   **纯文本、不是按钮** —— 位置先占住；以后要能切换，把它换成 button + 菜单，
+   排版不用动。 */
+.wsRow {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 8px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--line-soft);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-mid);
+}
+
+.wsMark {
+  color: var(--ink-faint);
+}
+
+.wsName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.consoleInput {
+  border: none;
+  background: none;
+  outline: none;
+  resize: none;
+  padding: 6px 0;
+  font-size: 15px; /* V2：14 → 15 */
+  line-height: 1.6;
+  max-height: 140px;
+}
+
+.consoleInput::placeholder {
+  color: var(--ink-faint);
+}
+
+/* 发送：34px 圆形图标按钮（C57 用户定 —— 抄 DSH；文字按钮在没有图标体系时更稳，
+   但我们已经有图标先例了：审批卡的 Y/N 徽标、组头的 ＋/⋯） */
+.consoleSend {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--plate);
+  cursor: pointer;
+}
+
+.consoleSend:hover:not(:disabled) {
+  background: var(--ink-hover);
+}
+
+.consoleSend:disabled {
+  background: var(--line-soft);
+  color: var(--ink-faint);
+  cursor: default;
+}
+
+/* 停止按钮：run 进行中发送按钮的「变身」（位置不变，角色切换）。
+   危险操作，用错误色系（与原来的 .btn-stop 同语言）；同样是 34px 圆。 */
+.consoleStop {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--pen-error);
+  color: var(--plate);
+  cursor: pointer;
+}
+
+.consoleStop:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* C13：输入台工具栏（C57 起是卡片的第三层，横跨整宽）。
+   左 = 审批档位，右 = 占位圆环 + 发送/停止。 */
+.consoleActions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.consoleActionsRight {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---- 输入台底部的状态条 ----
+   A3：会话级统计（轮次/工具/token）原本长在 <TraceRail> 底部，随轨迹栏下线后
+   没地方显示了。参考 DSH 的输入框底栏放这里：左读数、右提示，一行两栏。
+   （DSH 那行还有 tok/s 与缓存命中率——我们没有这两个数据，不编。） */
+.statusBar {
+  width: var(--col); /* 与输入框同列 */
+  /* 2026-11-18 定案：卡片下沿 → 这行读数 = 6px（原 9）。
+     贴着输入台的三个间距一并改过，口径见 .consoleFrame 的注释。 */
+  margin: 6px auto 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  font-family: var(--font-mono);
+  font-size: 12px; /* V2：11 → 12 */
+  letter-spacing: 0.02em;
+  color: var(--ink-faint);
+}
+
+/* 读数比操作提示重要一档：提示看一次就记住了，读数每次都在变 */
+.statusStats {
+  color: var(--ink-mid);
+  white-space: nowrap;
+}
+
+/* 窄屏：指令台收窄内边距（骨架 .deck 的改列在全局媒体查询） */
+@media (max-width: 900px) {
+  .console {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}

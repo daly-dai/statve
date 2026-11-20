@@ -1,0 +1,62 @@
+/* ============================================================
+   transcript-pane/index.module.css —— 转录稿滚动容器（2026-11-19 从 page.module.css 搬来）
+   ============================================================
+   注意归属变化：`.transcript` 不再是"页面样式"，它属于这个组件。
+   页面对它只剩一条规则（空态时藏起来），用的是**属性选择器**
+   `[data-role="transcript"]`，所以跨模块也不怕哈希改名 —— 见 app/page.module.css。
+   ============================================================ */
+
+.transcript {
+  overflow-y: auto;
+  min-height: 0;
+  /* 左右不留内边距：列宽由 .reel 用 --col 自己算（见 page.module.css 的 .stage 注释）。
+     ⚠️ 滚动条两侧都预留（both-edges）：否则滚动条一出现，内容盒窄 9px，
+     转录稿列会比输入框列**左移 4.5px** —— 两条列本该同轴（2026-11-18 实测）。 */
+  padding: 32px 0 6px;
+  scrollbar-gutter: stable both-edges;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+.transcript::-webkit-scrollbar {
+  width: 9px;
+}
+
+.transcript::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 99px;
+}
+
+.reel {
+  /* 阅读列：右栏宽的 70%，最低 720px，居中（--col 定义在 page.module.css 的 .stage 上） */
+  width: var(--col);
+  margin: 0 auto;
+}
+
+/* ---- 上下文压缩提示（B2） ---- */
+/* 后端在压缩（调模型生成摘要）时给用户的反馈条，跟消息同列宽（它已经在 .reel 里了，
+   所以 100% 即列宽，不要再套一层 --col）。
+   C13 的命令执行中 / 执行结果也用这一套样式 —— 位置相同、语气相同。 */
+.compacting {
+  margin: 10px auto 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.compactingLabel {
+  color: var(--pen-signal);
+}
+
+/* 窄屏：转录稿收窄内边距（骨架 .deck 的改列在全局媒体查询） */
+@media (max-width: 900px) {
+  .transcript {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}
