@@ -1,0 +1,27 @@
+/* ============================================================
+   no-session-hint/index.module.css —— 无会话时的那一句话（C67）
+   ============================================================
+   位置不归它管：它占满页面的 `.stage` 唯一那一行（1fr），自己居中。
+   ⚠️ 那条"舞台改成一行"的规则必须写在 app/page.module.css 里
+      （`.stage[data-nosession]`）—— 舞台是页面的栅格，不是这句话的样子。
+   ============================================================ */
+
+.pane {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: 24px;
+}
+
+/* ⚠️ 颜色是 --ink-mid，不是 --ink-faint。
+   globals.css 给 --ink-faint 的定义是「不承载任何决策信息 —— 读不到也不影响你
+   决定下一步」，而这句话**就是**"下一步干嘛"。判据在 token 自己的注释里。
+   字体度量沿用「正在压缩上下文」那条提示（等宽 12.5px / 0.02em） —— 同一类
+   "系统在跟你说话"的语气。 */
+.hint {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+  color: var(--ink-mid);
+}

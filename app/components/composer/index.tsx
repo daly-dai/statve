@@ -30,6 +30,19 @@ import type { CommandMenuState } from "@/app/lib/use-command-menu";
 import type { ApprovalMode } from "@/app/services/chat/types";
 import type { SessionStats } from "@/lib/types";
 
+// ============ 文案与空态零件（纯函数，不碰状态） ============
+
+/**
+ * 输入框的提示语。
+ *
+ * 以前是两句（"还没有会话"时换成「先在工作空间里开一个会话」）—— C67 之后
+ * 那种情况**根本不渲染输入台**（右栏只留一句话，见 `<NoSessionHint>`），
+ * 所以这句只剩一个值、也不再需要三元。
+ *
+ * ⚠️ 必须定义在组件**之前**：eslint 的 `no-use-before-define` 会报（常量不提升）。
+ */
+const COMPOSER_PLACEHOLDER = "描述你想要构建的内容，/调用指令";
+
 type ComposerProps = {
   /** useCommandMenu 的整套返回值：输入值 / 快照 / 键盘导航 / 提交 */
   command: CommandMenuState;
@@ -43,8 +56,12 @@ type ComposerProps = {
   contextPressure: ContextPressure | undefined;
   /** 空会话：卡片内顶部那行工作空间名 + 换一句 placeholder */
   empty: { visible: boolean; workspaceName?: string };
-  /** 输入台的可用性与遮挡（disabled = 无会话或运行中；covered = 卡片占位） */
-  state: { disabled: boolean; covered: boolean; hasSession: boolean };
+  /**
+   * 输入台的可用性与遮挡。
+   * ⚠️ C67 起**没有**"没有会话就不能发"这一档了 —— 无会话时页面根本不渲染输入台，
+   * 所以 `disabled` 只表示"本次 run 还在跑"。
+   */
+  state: { disabled: boolean; covered: boolean };
 };
 
 export function Composer({
@@ -120,7 +137,7 @@ export function Composer({
           onChange={(event) => handleInputChange(event.target.value)}
           onKeyDown={handleKeyDown}
           onBlur={handleBlur}
-          placeholder={composerPlaceholder(state.hasSession)}
+          placeholder={COMPOSER_PLACEHOLDER}
           disabled={state.disabled}
           autoFocus
         />
@@ -130,11 +147,7 @@ export function Composer({
           <ApprovalModeMenu mode={approval.mode} onChange={approval.onChange} />
           <div className={styles.consoleActionsRight}>
             <ContextMeter pressure={contextPressure} />
-            <SubmitButton
-              run={run}
-              input={input}
-              hasSession={state.hasSession}
-            />
+            <SubmitButton run={run} input={input} />
           </div>
         </div>
       </div>
@@ -155,7 +168,6 @@ type SubmitButtonProps = {
   run: { loading: boolean; runId: string; stop: (runId: string) => void };
   /** 有字才可发（空白字符不算） */
   input: string;
-  hasSession: boolean;
 };
 
 /**
@@ -164,7 +176,7 @@ type SubmitButtonProps = {
  * 为什么不拆成两个组件：拆开就必然在父级写三元选哪个，而"同一颗按钮换角色"
  * 这件事本身就是要让人一眼看出来的（位置永远不变，操作跟随视线）。
  */
-function SubmitButton({ run, input, hasSession }: SubmitButtonProps) {
+function SubmitButton({ run, input }: SubmitButtonProps) {
   if (run.loading) {
     return (
       <button
@@ -186,7 +198,7 @@ function SubmitButton({ run, input, hasSession }: SubmitButtonProps) {
     <button
       className={styles.consoleSend}
       type="submit"
-      disabled={!input.trim() || !hasSession}
+      disabled={!input.trim()}
       aria-label="发送"
       title="发送（Enter）"
     >
@@ -207,19 +219,7 @@ function SubmitButton({ run, input, hasSession }: SubmitButtonProps) {
   );
 }
 
-// ============ 文案与空态零件（纯函数，不碰状态） ============
-
-/**
- * placeholder 的两句话。
- *
- * 为什么提到模块层：写进 JSX 的三元会把组件的圈复杂度顶到 eslint 上限，
- * 而这两句就是常量，跟组件状态无关。
- */
-function composerPlaceholder(hasSession: boolean): string {
-  return hasSession
-    ? "描述你想要构建的内容，/调用指令"
-    : "先在工作空间里开一个会话，再给它目标";
-}
+// ============ 空态零件（纯函数，不碰状态） ============
 
 /** 空会话：卡片内顶部那行「▸ 工作空间名」—— 纯文本，不是按钮 */
 function workspaceRow(empty: { visible: boolean; workspaceName?: string }) {
