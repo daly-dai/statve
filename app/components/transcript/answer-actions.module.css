@@ -1,0 +1,91 @@
+/* ============================================================
+   answer-actions.module.css —— 回答底部的动作行（C61）
+   ============================================================
+   一条判据：对**已经生成的内容**做事 ⇒ 悬停才现（不该占读者的注意力）。
+   尺寸抄 pi-web `MessageView.tsx:512-553`；命中区按本项目 `--hit` 判据撑到 32。
+   ============================================================ */
+
+.answerRow {
+  display: flex;
+  justify-content: flex-end;
+  gap: 3px;
+  margin-top: 3px;
+  min-height: 22px;
+}
+
+.answerActs {
+  display: flex;
+  gap: 3px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+}
+
+/* 键盘 Tab 会走到"眼里看不见"的按钮上，焦点一进来就得让它现身。
+   （"悬停整条回合才现身"那条住在父组件 —— 它选的是回合，不是这一块。） */
+.answerActs:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* 被打断 / 失败的回合常驻（那时人更可能要把已有内容拿走） */
+.answerRow[data-persistent] .answerActs {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.act {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--ink-faint);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color 0.12s,
+    background-color 0.12s;
+}
+
+/* 视觉 22、命中 32：向外扩 5px 的透明层。
+   ⚠️ 目的不是"看着小"，是"点得到"——可点性下限是 --hit: 34，22px 的按钮不能真的只有 22。 */
+.act::before {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: 8px;
+}
+
+.act:hover {
+  color: var(--ink);
+  background: var(--feed-hover);
+}
+
+.act:focus-visible {
+  outline: 2px solid var(--pen-user);
+  outline-offset: 3px;
+}
+
+.act svg {
+  width: 11px;
+  height: 11px;
+  flex: none;
+}
+
+.act[data-copied="true"] {
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .answerActs,
+  .act {
+    transition: none;
+  }
+}

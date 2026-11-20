@@ -1,0 +1,61 @@
+/* ============================================================
+   index.module.css —— 回合骨架（C57 P1）
+   ============================================================
+   数值全部对应原型 workspace/prototype-right-pane-v5.html：
+     回合间距 22 · 气泡是「面」用 --surface-bubble（不借 --feed-*）
+   过程组 / 工具行 / 思考行 / 动作行的样式跟着各自的文件走。
+   ============================================================ */
+
+.turn {
+  margin: 0 0 22px;
+}
+
+/* ---- 用户那句话：右对齐气泡（身份靠位置，不靠"你 / 时间"发言栏） ---- */
+.say {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 14px;
+}
+
+.bubble {
+  max-width: 78%;
+  margin: 0;
+  padding: 8px 14px;
+  background: var(--surface-bubble);
+  border-radius: 14px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---- 最终回答：整宽 markdown ---- */
+.answer {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--ink);
+  /* 列窄了（720）以后，带宽表的回答会从两侧被裁掉：让回答区自己横向滚动，
+     表格本身不动（居中溢出 → 改成"从左排、可滑"）。2026-11-18 实测截图发现。 */
+  overflow-x: auto;
+}
+
+/* ---- 回合尾部的说明（失败 / 被停止 / 没有产出） ---- */
+.note {
+  margin: 8px 0 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-faint);
+}
+
+/* ---- 悬停整条回合 → 动作行现身（C61） ----
+   ⚠️ 用的是**属性选择器**而不是 `.answerActs`：动作行已经搬进
+   answer-actions/ 自己的 CSS 模块，类名被哈希过，跨文件写类名指不到。
+   属性不受哈希影响 —— 这条坑在 2026-11-19 拆页面时踩过，这里直接用对的做法。
+   同权重（三个 class 级）与拆分前一致：`.turn:hover [data-role]`。 */
+.turn:hover [data-role="answer-actions"] {
+  opacity: 1;
+  pointer-events: auto;
+}
