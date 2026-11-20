@@ -359,6 +359,62 @@ export function dropDraft(state: Drafts, id: string): Drafts; // 会话被删
 - 建议排在 **C57-P1（转录稿）之后**、C58 之前 —— 它改的是 `useCommandMenu`，与转录稿重构不冲突；
 - 与 **C56** 的关系：C56 那三条"离开当前会话"的入口（切会话 / 新建会话 / 新增工作空间）将来只调 `setCurrentId`，草稿自然按会话分开 —— **C59 落地后，那三处不需要再手动清输入框**。
 
+#### 实施记录（2026-11-20，`ca3cced`）
+
+**方案取 A + B**：值仍是派生（`input = drafts[当前会话]`），但把那张表**落到 localStorage**。
+用户拍板的理由一句话：**"咱们不是网页端吗 内存版岂不是刷新完就没了"** —— 是对的，刷新在网页端是常态。
+
+| 层 | 文件 | 职责 |
+|---|---|---|
+| 纯逻辑（可测） | `app/lib/draft-store/index.ts` | `setDraft` / `dropDraft` / `draftOf`；文字没变返回同一引用 |
+| 持久化（碰 `window`） | `app/lib/draft-store/storage.ts` | 键 `composer:draft:<id>`（照 task-panel 的 `todoPanel:dismissed:<id>`）· 空串=删键 · 服务端不崩 · 配额满不炸 |
+| 接线 | `app/lib/use-command-menu.ts` | 5 个写入点；导出 `forgetDraft` 供页面删会话时用 |
+
+**与本节原设计的差异**：原设计只列了 `set` / `clear` / `drop` 三个函数名，实际 **`clear` 并入 `drop`**
+（发送完清空 与 会话被删 是**同一个操作**，留两个名字只是给调用处读懂语义的机会 → 改成在调用处写注释）。
+
+**删掉的死 API**：`useCommandMenu` 原来导出一个 `setInput`（注释写"空态例句 pickSeed 等外部填输入框用"），
+全仓库**无人使用**（那句空态例句从没实现过）⇒ 随这次重构一起删。
+
+##### 三个实施中发现（都有实测，不是推测）
+
+1. **React Compiler 会因为一处写法放弃分析整个 hook。**
+   `const input = draftOf(drafts, sessionId)` 直接写在渲染期 ⇒ eslint 报 **5 条**
+   `Existing memoization could not be preserved`，其中一条落在**没改过的** `handleKeyDown` 上
+   （所以是"整体放弃"，不是局部）。二分结论：
+   - 直接调用 ✗
+   - 内联 `drafts[sessionId] ?? ""` ✓
+   - `useMemo(() => draftOf(...), [drafts, sessionId])` ✓ ← 选它（保住单一实现）
+
+   推测机制：跨模块调用的返回值无法被证明是纯的，而它又要参与几个 `useCallback` 的依赖 ⇒ 编译器弃权。
+   **可复用判据：渲染期算出的派生值，如果还要当 `useCallback` 的依赖，就包一层 `useMemo`。**
+
+2. **`setState-in-effect` 的豁免注释必须写在 `setState` 那一行。**
+   写在 `useEffect(` 上一行 → 报 `Unused eslint-disable directive`，**错误照报**。
+
+3. **上午刚加的 `max-lines: 500` 下午就抓住了加功能的人。**
+   加完 C59 后 `app/page.tsx` **510 行** ⇒ 按 §11.9 把 `labelOfSession` / `hasConversation`
+   搬进 `app/lib/session-view/`（+8 条测试），页面回到 **484**。**没有删注释凑数。**
+
+##### 已知取舍（按本节原设计的三条，逐条落地情况）
+
+| 原取舍 | 落地 |
+|---|---|
+| 命令文本算不算草稿 | **算**（`/compact ` 之类跟着会话走，保持"输入框里的一切"一个语义） |
+| 删会话时要不要提示"草稿一起没了" | **不提示**（删会话本身已有确认条） |
+| 刷新要不要留 | **留**（B 方案）—— 代价是首帧：服务端没有 localStorage，挂载后才读盘 ⇒ 草稿"跳出来"一下 |
+
+##### 两条这次新增、需要知道的边界
+
+1. **多标签页不同步**：两个标签各自读一次盘、各自写盘，"最后写的赢"。同一个会话在两个标签同时打草稿是极罕见场景，不做 `storage` 事件同步。
+2. **草稿是明文存在浏览器里**：可能是一段没发出去的话。对本地工具可接受（会话历史本来就明文存在 `~/.statve`），但别把它当加密存储。
+
+##### 读数
+
+`tsc` 0 · `eslint` 0 · `prettier` 0 · 单测 **67 文件 / 940 用例**（+3 文件 +22 用例：draft-store 14 + session-view 8）。
+真机六步（切会话不串字 / 刷新还在 / 发送清空 / 空会话丢弃 / localStorage 键）用户已点，无问题。
+
+
 ### 4.13 定案补记（2026-11-17，看完原型后拍板）
 
 **原型**：`workspace/prototype-right-pane-v5.html`（A 同一回合两种排法 / B 四种状态 / C 空态三版 / D 工具行展开）
