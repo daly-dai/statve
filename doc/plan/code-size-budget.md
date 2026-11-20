@@ -172,3 +172,68 @@ node scripts/check-size.mjs
 `transcript/index.tsx` 内部已经天然分成 6 块（`ToolRow` 81 行 / `ProcessGroup` 80 / `AnswerActions` 56 / `Transcript` 74 /
 `ReasoningRow` 43 / `StepView` 25），现在拆是零成本；等它长到 550 再拆就得动逻辑了。**脚本 `check-size.mjs` 仍未建**，
 C64 因此停在 `进行中`。
+
+### 8.6 第二批（同日，用户点的第 2 项）：`components/transcript` 480 → **110**
+
+用户原话：「2. components/transcript/index.tsx 480 行拆分 很适合拆」。§8.5 点名的候选，当天就做了。
+
+| 文件 | 行数 | 一句话职责 |
+|---|---|---|
+| `index.tsx` | **110** | 回合骨架：气泡 + 过程组 + 回答 + 尾部说明 |
+| `process-group.tsx` | 148 | 过程组的折叠头 + 展开壳（+ 摘要文案 / 进行中抬头） |
+| `tool-row.tsx` | 128 | 一行工具调用（+ 类别标记 / 状态标记 / 参数摘要） |
+| `answer-actions.tsx` | 74 | 回答底部的动作行（C61） |
+| `reasoning-row.tsx` | 59 | 思考行（C58） |
+| `step-view.tsx` | 43 | 一条过程按 `kind` 分派 |
+
+样式同样跟着组件走：旧的 `transcript.module.css`（460 行）拆成 6 个 CSS 模块，`index.module.css` 接替它的位置
+（顺手把命名对齐 11.9 的约定 —— 原来叫 `transcript.module.css` 是历史遗留）。
+
+#### 8.6.1 跨文件选择器：同一条坑，第二次撞
+
+旧 CSS 里有这条，它**横跨两个组件**：
+
+```css
+.turn:hover .answerActs { opacity: 1; pointer-events: auto; }
+```
+
+`.turn` 留在 `index`，`.answerActs` 搬进 `answer-actions`，两个类名各自被哈希 ⇒ 规则静默失效。
+**表现是"悬停回合、复制按钮再也不出现"，控制台一个字都不报**（`opacity: 0` 还在，只是没人把它翻回来）。
+
+解法与 8.3 ① 同一条：**跨组件边界用属性选择器**。
+`<div className={styles.answerActs} data-role="answer-actions">` + `.turn:hover [data-role="answer-actions"]`，
+weight（权重）不变，仍是三个 class 级。
+
+⇒ **这条现在可以当结论用了**：拆 CSS 时，凡选择器里出现"两个不同组件的类名"，就必须先把其中一个换成
+`data-*` 钩子，否则失败是静默的。两次撞的都是它，所以写进这里。
+
+#### 8.6.2 顺手逮到的存量缺陷：两处悬空样式引用
+
+`tool-row` 里 `className={styles.stepBlock}` / `styles.kv` 两个类，**从 C57 起就不存在**
+（`git show HEAD:` 里查过，旧 CSS 从来没有这两个类）⇒ 一直解析成 `undefined`，等于没加类。
+
+- 处理：删掉这两处 `className`（**零视觉变化**，DOM 一个字节都不变），并把 CSS 头注释里那句"故意没有"删掉。
+- 顺带把这类检查做成一次扫描：**全仓库 `.tsx` 里 `styles.X` 引用了但对应 `*.module.css` 里没有定义的，现在 0 处**。
+  做法 = 解析每个文件的 `import <alias> from "*.module.css"` → 收集 `<alias>.Class` 引用 → 与该 CSS 的选择器集合求差。
+  **以后拆分前先跑一遍，比人眼靠谱。**
+
+⚠️ **诚实记一笔**：这次清理和搬迁混进了同一个 commit。判据是"**它是不是零行为变化**" ——
+删掉一个恒为 `undefined` 的 className 不改 DOM，且 commit message 明写了；若它会改行为，就必须单独一个 commit。
+
+#### 8.6.3 对账（比 8.4 多一关：选择器级）
+
+| 关 | 做法 | 结果 |
+|---|---|---|
+| 声明 | 旧 `transcript.module.css` 与 6 个新文件的全部 `prop: value` 求差 | 118 → 118，**丢失 0 / 发明 0** |
+| **选择器** | 同上，但按逗号拆分、归一空白后比较 | 59 → 59；旧有新无 **1 条** = 8.6.1 那条有意改写；新有旧无 **1 条** = 它的对手 |
+| 类引用 | 每个 `.tsx` 的 `styles.X` ↔ 自己 CSS 的定义，双向查 | 缺失 0、死样式 0（`markdown` 是 `:global(.markdown-body)` 的误报） |
+| 编译产物 | 抓 dev server 的 CSS chunk | 6 个模块哈希各自独立；`height: 24px` / `out` 的 `max-height: 220px` / `rotate(180deg)` / `mask-image` 逐条命中 |
+
+**为什么这次要加"选择器级"**：8.4 那次只比了声明，而声明是**与选择器解耦**的 —— 选择器写错（或指不到）时声明一条不少。
+这次的风险正好全在选择器上（跨文件），所以那一关必须单独加。
+
+#### 8.6.4 现在的体量水位
+
+`app/page.tsx` **498** · `repos/page.tsx` 458 · `transcript/` 里最大 `process-group.tsx` 148。
+⇒ **全仓库已经没有接近 500 的组件了**；下一批真要拆的话是 `page.tsx`（498）或 `repos/page.tsx`（458），
+但两者都"逻辑单一"，按 11.9「500 是触发线不是目标」，**没有理由现在动**。脚本 `check-size.mjs` 仍未建。
