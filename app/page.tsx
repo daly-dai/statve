@@ -70,6 +70,7 @@ import { useCommandMenu } from "./lib/use-command-menu";
 import { useSessions } from "./lib/use-sessions";
 import { useWorkspaces } from "./lib/use-workspaces";
 import { groupSessions } from "./lib/session-groups";
+import { hasConversation, labelOfSession } from "./lib/session-view";
 import { stageDataOf, stageModeOf } from "./lib/stage-mode";
 import { DirectoryBrowser } from "./components/directory-browser";
 import { useTraces } from "./lib/use-traces";
@@ -167,6 +168,8 @@ export default function Home() {
     sessionId: currentId,
     disabled: composerDisabled,
   });
+  // C59：删会话的三条路径都要把它的草稿一起扔掉
+  const { forgetDraft } = command;
 
   /**
    * 丢掉"建了没用"的当前会话（就是新增工作空间时自动建的那条）。
@@ -177,8 +180,12 @@ export default function Home() {
    */
   const discardUntouched = useCallback(() => {
     if (!currentId || messages.length > 0) return;
-    void discardEmpty(currentId);
-  }, [currentId, messages.length, discardEmpty]);
+    // C59：服务端确认"真的删掉了"才丢草稿 —— 它有内容时服务端会拒绝删除，
+    // 那时会话还在，草稿不能跟着没（`deleted` 就是那句确认）。
+    void discardEmpty(currentId).then((deleted) => {
+      if (deleted) forgetDraft(currentId);
+    });
+  }, [currentId, messages.length, discardEmpty, forgetDraft]);
 
   // 审批模式（B1-②）：页面挂载时读服务端当前值；切换调接口（运行时生效，
   // 重启恢复 config 默认）。参考项目都有此入口（pi /settings、DSH /permission）
@@ -302,6 +309,7 @@ export default function Home() {
               // B22：删会话 = 服务端删除 + 本地清桶（abort 在跑流，帧不再写）
               useRunStore.getState().deleteRun(id);
               remove(id);
+              forgetDraft(id); // C59：草稿不给会话保命（用户 2026-11-17 定的）
             }}
             onCreateWorkspace={() => {
               setWorkspaceError(null);
@@ -315,9 +323,15 @@ export default function Home() {
             }}
             onDeleteWorkspace={(workspace) => {
               // 删工作空间 = 记录 + 它名下的会话一起删（用户 2026-11-11 定的"粗暴"语义），
-              // 所以删完必须重拉会话列表，否则侧栏还挂着已经不存在的行
+              // 所以删完必须重拉会话列表，否则侧栏还挂着已经不存在的行。
+              // C59：这些会话的草稿要一起作废 —— 先记住它们是谁（删完列表就查不到了）
+              const doomed =
+                groups
+                  .find((group) => group.workspaceId === workspace.id)
+                  ?.sessions.map((session) => session.id) ?? [];
               removeWorkspace(workspace.id).then((deleted) => {
                 if (deleted === null) return;
+                doomed.forEach(forgetDraft);
                 refresh();
               });
             }}
@@ -463,35 +477,7 @@ export default function Home() {
   );
 }
 
-// ============ 展示数据的推导（纯函数，跟着页面走） ============
-
-/**
- * 会话的显示标签（**和侧栏那一行的标签同一条链**：标题 ?? 首条消息 ?? 空）。
- * 提到模块层是为了不把 `find + 可选链` 的分支记到 Home 的圈复杂度上。
- */
-function labelOfSession(
-  sessions: { id: string; title?: string; preview?: string }[],
-  id: string,
-): string {
-  const found = sessions.find((item) => item.id === id);
-  if (!found) return "";
-  return found.title ?? found.preview ?? "";
-}
-
-/**
- * 这个会话有没有"对话"可看 —— 决定右栏顶部的「对话 / 轨迹」tab 要不要出现。
- *
- * 判据两条任一成立即可：
- *   ① 本次打开后已经加载/产生了消息；
- *   ② 列表里这条会话已有首条消息的预览（服务端事实，进页面就有，不会闪）。
- * 都没有 ⇒ 这是新会话，tab 没有意义（没有对话也没有轨迹）。
- */
-function hasConversation(
-  sessions: { id: string; preview?: string }[],
-  id: string,
-  messageCount: number,
-): boolean {
-  if (messageCount > 0) return true;
-  const found = sessions.find((item) => item.id === id);
-  return Boolean(found?.preview);
-}
+// ============ 展示数据的推导 ============
+// `labelOfSession` / `hasConversation` 原本驻在这里，2026-11-20 加 C59 时页面被
+// 我们自己的 `max-lines: 500` 规则抓住（510 行）⇒ 按 §11.9 的分界把它们搬进
+// `app/lib/session-view/`（纯函数 + 单测）。页面只负责组装，不再持有这两条判据。
