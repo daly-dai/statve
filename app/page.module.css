@@ -79,6 +79,15 @@
   display: none;
 }
 
+/* ---- 无会话（C67）：右栏只剩一句话，**没有输入台** ----
+   ⚠️ 这里必须换行模板：A 态只有一个子元素，不换的话它会落在**第一行**
+   （标题行那一格）= 贴顶，而不是居中。和 data-empty / data-tabs 同一套手法。
+   声明位置放这几条之后：`.stage[data-empty]` 与它同权重（0,2,0），后写的赢；
+   正常情况两者不会同时出现（page.tsx 的 stageDataOf 只给一个），这里只兜底。 */
+.stage[data-nosession] {
+  grid-template-rows: minmax(0, 1fr);
+}
+
 /* 输入台容器：hero + 指令台的宿主。class 留在页面这边，因为
    `.stage[data-empty] > .composerArea` 是**舞台的规则**（谁在栅格里哪一行），
    不是指令台自己的样子。 */

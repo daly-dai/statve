@@ -35,7 +35,10 @@ import type { SessionSummary } from "@/app/services/sessions/types";
 export function useSessions() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [currentId, setCurrentId] = useState("");
-  const [loading, setLoading] = useState(false);
+  // C67：初值是 **true**。首屏（含服务端渲染的那一版 HTML）在列表回来之前
+  // 什么都别画 —— 否则"没有会话"那句话会先出现、被客户端 effect 的 loading 抹掉、
+  // 然后又出现（闪三下）。页面用 `stageModeOf` 区分"加载中"与"真的没有会话"。
+  const [loading, setLoading] = useState(true);
 
   /** 拉列表；返回最新列表，供 create/remove 决定切到哪 */
   const refresh = useCallback(

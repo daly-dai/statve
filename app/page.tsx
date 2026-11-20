@@ -54,6 +54,7 @@ import styles from "./page.module.css";
 import { Nameplate } from "./components/nameplate";
 import { Composer } from "./components/composer";
 import { EmptyHero } from "./components/empty-hero";
+import { NoSessionHint } from "./components/no-session-hint";
 import { StageTabs, type StageTab } from "./components/stage-tabs";
 import { TranscriptPane } from "./components/transcript-pane";
 import { buildTranscript } from "./lib/transcript";
@@ -69,6 +70,7 @@ import { useCommandMenu } from "./lib/use-command-menu";
 import { useSessions } from "./lib/use-sessions";
 import { useWorkspaces } from "./lib/use-workspaces";
 import { groupSessions } from "./lib/session-groups";
+import { stageDataOf, stageModeOf } from "./lib/stage-mode";
 import { DirectoryBrowser } from "./components/directory-browser";
 import { useTraces } from "./lib/use-traces";
 import { SessionBar } from "./components/session-bar";
@@ -88,6 +90,8 @@ export default function Home() {
     rename,
     remove,
     refresh,
+    // C67 起页面要它：列表还没回来时右栏**什么都不画**（否则"没有会话"那句话会闪一下）
+    loading: sessionsLoading,
   } = useSessions();
 
   // 工作空间（C51）：侧栏的分组依据。它就是"会话属于哪个文件夹"的唯一来源 ——
@@ -146,10 +150,12 @@ export default function Home() {
     setError,
   } = useAgentRun(currentId);
 
-  // 输入台能不能用：没有会话就**不能发**（以前只看 loading，于是"新增了工作空间
-  // 但还没会话"时输入框照样能打字，回车打到 `sessionId=""` 上 ⇒ 404「会话不存在」）。
-  const hasSession = Boolean(currentId);
-  const composerDisabled = loading || !hasSession;
+  // 输入台在 run 进行中不可用。
+  // ⚠️ C67 起这里**不再看"有没有会话"**：那种情况页面根本不渲染输入台（右栏只留
+  // 一句话，见 stageModeOf）。原来那句 `|| !hasSession` 修的是 2026-09 的
+  // "新增了工作空间但还没会话时，回车打到 `sessionId=""` 上 ⇒ 404「会话不存在」" ——
+  // 现在连输入框都没有，这条 404 无从发生。
+  const composerDisabled = loading;
 
   // 输入控制台 + 命令面板（C13 拆出 hook，2026-11-19 整份交给 <Composer>）：
   // input 状态/快照/过滤/键盘导航/pick/submit 的命令分支全在 hook 里，
@@ -260,6 +266,11 @@ export default function Home() {
   // 所以只算一次 —— 两个 `!showTabs` 各写各的迟早会漂）
   const emptyStage = !showTabs;
 
+  // 右栏现在有三种模式（C67）：加载中 / 无会话 / 有会话。两个纯函数把分支从
+  // Home 的圈复杂度里拿走 —— 它们只是查表，不该占组件主体的预算。
+  const stageMode = stageModeOf(currentId, sessionsLoading);
+  const stageData = stageDataOf(stageMode, showTabs);
+
   return (
     <div className="app">
       <div className="deck">
@@ -315,99 +326,112 @@ export default function Home() {
 
         <main
           className={styles.stage}
-          data-tabs={showTabs ? undefined : "none"}
-          data-empty={emptyAttr(showTabs)}
+          data-tabs={stageData.tabs}
+          data-empty={stageData.empty}
+          data-nosession={stageData.nosession}
         >
-          {/* 1. 会话标题行（右栏第一行）：标题 + 模型名。
+          {/* C67：无会话（且会话列表已加载完）时右栏只留一句话 —— 输入台根本不渲染。
+              加载中 visible=false ⇒ 什么都不画，避免这句话闪一下。 */}
+          <NoSessionHint visible={stageMode === "no-session"} />
+          {stageMode === "session" ? (
+            <>
+              {/* 1. 会话标题行（右栏第一行）：标题 + 模型名。
               新会话（标题空 / 还是「新会话」）不显示标题，只留右边 —— 规则在组件里。 */}
-          <SessionBar
-            label={labelOfSession(sessions, currentId)}
-            model={model}
-          />
-          {/* A3 顶部 tab：对话 / 轨迹。指令台在 .stage 的最后一行，两个 tab
+              <SessionBar
+                label={labelOfSession(sessions, currentId)}
+                model={model}
+              />
+              {/* A3 顶部 tab：对话 / 轨迹。指令台在 .stage 的最后一行，两个 tab
               共用它——切到轨迹也照样能发消息（B17④ 的常驻输入框）。
               ⚠️ 新会话不显示 tab（没有对话也没有轨迹可看，显示切换器只是噪音）。 */}
-          <StageTabs value={tab} onChange={setTab} hidden={!showTabs} />
+              <StageTabs value={tab} onChange={setTab} hidden={!showTabs} />
 
-          {/* 两个 tab 共用同一个 1fr 槽位——所以这里必须二选一。
+              {/* 两个 tab 共用同一个 1fr 槽位——所以这里必须二选一。
               代价：切走再回来，转录稿的滚动位置会丢（组件卸载了）。
               一期先接受；要保住就得两个都挂着用 visibility 藏，不值当。 */}
-          {tab === "chat" ? (
-            <TranscriptPane
-              turns={turns}
-              streaming={loading}
-              toolOutputs={toolOutputs}
-              liveSince={liveSince}
-              compacting={compacting}
-              command={{ running: commandRunning, feedback: commandFeedback }}
-            />
-          ) : (
-            <TraceViewer
-              fold={traces.fold}
-              runs={traces.runs}
-              loading={traces.loading}
-            />
-          )}
+              {tab === "chat" ? (
+                <TranscriptPane
+                  turns={turns}
+                  streaming={loading}
+                  toolOutputs={toolOutputs}
+                  liveSince={liveSince}
+                  compacting={compacting}
+                  command={{
+                    running: commandRunning,
+                    feedback: commandFeedback,
+                  }}
+                />
+              ) : (
+                <TraceViewer
+                  fold={traces.fold}
+                  runs={traces.runs}
+                  loading={traces.loading}
+                />
+              )}
 
-          {/* 任务面板（Phase 5）：钉在输入台上方，与输入框同列宽（830 居中）。
+              {/* 任务面板（Phase 5）：钉在输入台上方，与输入框同列宽（830 居中）。
               只读展示（todo 唯一写者是模型）；头部常驻显示进度，展开看明细；
               sessionId 用于关闭状态按会话隔离（Reasonix 式，纯前端 localStorage）。
               B17②：key={currentId} —— dismissed 是 useState 初始值，只在挂载时
               读 localStorage；切会话不重挂载会停留在旧会话的关闭标记（A 关了
               面板 B 也被藏掉）。key 变 = 强制重挂载 = 重新读。 */}
-          <div className={styles.todoBar}>
-            <TaskPanel key={currentId} todos={todos} sessionId={currentId} />
-          </div>
-
-          {/* 错误横幅：提到提问卡/输入框之外，两种状态下都可见 */}
-          {error && (
-            <div className={styles.alarm} role="alert">
-              <span className={styles.alarmTag}>运行失败</span>
-              <span>{error}</span>
-            </div>
-          )}
-
-          {/* 底部决策区（B17④：输入框常驻 + 覆盖层，替换原三选一）。
-              B17④ 动机：原结构 pendingApproval ? 审批卡 : pendingAsk ?
-              提问卡 : 输入框——审批/提问出现时输入框整个卸载，卡关闭后
-              重建 → 焦点/IME/滚动丢失（输入框虽是 loading 禁用的，命令
-              面板也随 console 一起卸载）。
-              改法：输入框永远在 DOM；审批/提问卡需要时文档流占位（视觉
-              与改造前完全一致——卡片仍占决策区、上面内容被推挤），输入框
-              absolute + visibility:hidden 藏起（DOM/ref 保留，卡关闭即恢复）。
-              两卡天然互斥（串行 run 同时只会等一个请求）→ && 各自独立，
-              无需优先级判断。 */}
-          <div className={styles.decisionHost}>
-            {pendingApproval && (
-              <div className={styles.decisionBar}>
-                <ApprovalDialog request={pendingApproval} onApprove={approve} />
+              <div className={styles.todoBar}>
+                <TaskPanel
+                  key={currentId}
+                  todos={todos}
+                  sessionId={currentId}
+                />
               </div>
-            )}
-            {pendingAsk && (
-              <div className={styles.decisionBar}>
-                <AskUserCard ask={pendingAsk} onAnswer={answerAsk} />
-              </div>
-            )}
-            {/* 输入台容器（C57）：**结构固定** —— 空会话 ↔ 有对话只换 data-empty 与
+
+              {/* 错误横幅：提到提问卡/输入框之外，两种状态下都可见 */}
+              {error && (
+                <div className={styles.alarm} role="alert">
+                  <span className={styles.alarmTag}>运行失败</span>
+                  <span>{error}</span>
+                </div>
+              )}
+
+              {/* 底部决策区（B17④）：审批/提问卡占位，输入台留在 DOM 里但被藏起来。
+              "为什么不能卸载输入台 / 为什么用 absolute + visibility" 的完整理由
+              住在 app/components/composer/ 的文件头（约束 ②）——这里不重复一份。 */}
+              <div className={styles.decisionHost}>
+                {pendingApproval && (
+                  <div className={styles.decisionBar}>
+                    <ApprovalDialog
+                      request={pendingApproval}
+                      onApprove={approve}
+                    />
+                  </div>
+                )}
+                {pendingAsk && (
+                  <div className={styles.decisionBar}>
+                    <AskUserCard ask={pendingAsk} onAnswer={answerAsk} />
+                  </div>
+                )}
+                {/* 输入台容器（C57）：**结构固定** —— 空会话 ↔ 有对话只换 data-empty 与
                 CSS，绝不换父级（换父级会重挂 textarea，焦点和没发出去的字一起丢；
                 DSH 在 EmptyHero.tsx 顶部专门写了这条）。 */}
-            <div className={styles.composerArea}>
-              <EmptyHero visible={emptyStage} />
-              <Composer
-                command={command}
-                approval={{ mode: approvalMode, onChange: switchApprovalMode }}
-                run={{ loading, runId, stop }}
-                stats={stats}
-                contextPressure={contextPressure}
-                empty={{ visible: emptyStage, workspaceName }}
-                state={{
-                  disabled: composerDisabled,
-                  covered: Boolean(pendingApproval) || Boolean(pendingAsk),
-                  hasSession,
-                }}
-              />
-            </div>
-          </div>
+                <div className={styles.composerArea}>
+                  <EmptyHero visible={emptyStage} />
+                  <Composer
+                    command={command}
+                    approval={{
+                      mode: approvalMode,
+                      onChange: switchApprovalMode,
+                    }}
+                    run={{ loading, runId, stop }}
+                    stats={stats}
+                    contextPressure={contextPressure}
+                    empty={{ visible: emptyStage, workspaceName }}
+                    state={{
+                      disabled: composerDisabled,
+                      covered: Boolean(pendingApproval) || Boolean(pendingAsk),
+                    }}
+                  />
+                </div>
+              </div>
+            </>
+          ) : null}
         </main>
       </div>
 
@@ -470,9 +494,4 @@ function hasConversation(
   if (messageCount > 0) return true;
   const found = sessions.find((item) => item.id === id);
   return Boolean(found?.preview);
-}
-
-/** 空会话才有 `data-empty`（给 CSS 换布局用；undefined 表示不写这个属性） */
-function emptyAttr(hasChat: boolean): string | undefined {
-  return hasChat ? undefined : "";
 }
