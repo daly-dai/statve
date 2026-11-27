@@ -369,6 +369,90 @@ describe("流式 —— 逐 token 读取", () => {
   });
 });
 
+// ---------- 缓存命中（C68） ----------
+// 两种 provider 形状 + "没报就不写键"这条口径。真实字段名见
+// DeepSeek 官方（prompt_cache_hit_tokens）与 OpenAI 风格（details.cached_tokens）。
+
+describe("缓存命中 → Usage.cachedInput", () => {
+  /** 跑一次流式请求，只关心 usage 那段 */
+  async function streamUsage(usageJson: string) {
+    stubFetch(() =>
+      sseResponse([
+        'data: {"choices":[{"delta":{"content":"好"}}]}\n\n',
+        `data: {"usage":${usageJson}}\n\n`,
+        "data: [DONE]\n\n",
+      ]),
+    );
+    return makeModel().complete({
+      systemPrompt: "sp",
+      messages: [createUserMessage("hi")],
+      tools: [],
+      onDelta: () => {},
+    });
+  }
+
+  it("DeepSeek 形状：prompt_cache_hit_tokens → cachedInput", async () => {
+    const msg = await streamUsage(
+      '{"prompt_tokens":8000,"completion_tokens":20,"total_tokens":8020,' +
+        '"prompt_cache_hit_tokens":7000,"prompt_cache_miss_tokens":1000}',
+    );
+
+    expect(msg.usage).toEqual({
+      input: 8000,
+      output: 20,
+      totalTokens: 8020,
+      cachedInput: 7000,
+    });
+  });
+
+  it("OpenAI 形状：prompt_tokens_details.cached_tokens → cachedInput", async () => {
+    const msg = await streamUsage(
+      '{"prompt_tokens":8000,"completion_tokens":20,"total_tokens":8020,' +
+        '"prompt_tokens_details":{"cached_tokens":6000}}',
+    );
+
+    expect(msg.usage.cachedInput).toBe(6000);
+  });
+
+  it("两种都没报 ⇒ Usage 里**没有** cachedInput 这个键（不是 0）", async () => {
+    const msg = await streamUsage(
+      '{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}',
+    );
+
+    // 断言"键不存在"，而不是"值为 undefined"：写 0 或写 undefined 都是
+    // 把"不知道"说成"零命中"，而且 `toEqual` 会当场把多余键揪出来。
+    expect("cachedInput" in msg.usage).toBe(false);
+    expect(msg.usage).toEqual({ input: 10, output: 5, totalTokens: 15 });
+  });
+
+  it("非流式走同一个 toUsage（C68 把两处映射收成一处）", async () => {
+    stubFetch(() =>
+      jsonResponse({
+        choices: [
+          {
+            message: { role: "assistant", content: "好" },
+            finish_reason: "stop",
+          },
+        ],
+        usage: {
+          prompt_tokens: 8000,
+          completion_tokens: 20,
+          total_tokens: 8020,
+          prompt_cache_hit_tokens: 6000,
+        },
+      }),
+    );
+
+    const msg = await makeModel().complete({
+      systemPrompt: "sp",
+      messages: [createUserMessage("hi")],
+      tools: [],
+    });
+
+    expect(msg.usage.cachedInput).toBe(6000);
+  });
+});
+
 // ---------- 错误策略（两条路径共用） ----------
 
 describe("错误策略 —— 不抛异常，转受控消息", () => {

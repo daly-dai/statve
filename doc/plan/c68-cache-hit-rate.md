@@ -110,16 +110,61 @@ function toUsage(u: OpenAiUsage): Usage {
 
 ⇒ `app/lib/trace*` **一行都不用改**。这是"选对了数据形状"省下来的工作。
 
-### 3.4 明确不做：任何界面显示
+### 3.4 界面显示：做（2026-11-24 用户改判）
 
-**一期只到数据层。** 理由两条：
+原来这一节写的是「一期只到数据层，显示归 C5」。用户随后定：**显示也做** —— 原话「先做C68 显示也做 然后我们在做注入就有了更直接的数据依据了」。
 
-1. **界面显示归 C5**（遥测 / 分析面板）。C68 是它的第一块砖：先有数，面板才有东西画。
-2. **不越规则**：`AGENTS.md` 11.8 规定任何视觉改动（含只改一个字号）必须先出 HTML demo。这轮是在会话中途插进来的，**不给自己加一道 demo 门**。
+⇒ 这一项从"数据层铺垫"升级成**一个有界面的功能**，必须走 `AGENTS.md` 11.8 那道门。
 
-想肉眼看到数字，两条路都不用改代码：
-- 打开 `<数据根>/sessions/<工作空间键>/<会话目录>/*.jsonl`（数据根默认 `~/.statve`，`STATVE_HOME` 可覆盖）
-- 打开同目录的 `trace.<runId>.jsonl`，找 `message_end`
+**demo 演进**（都在 `workspace/`，都是过期即弃的工地）：
+
+| 文件 | 用途 |
+|---|---|
+| `prototype-c68-cache-hit.html` | 第一版：三个候选位置并排（A 回合尾 / B 圆环面板 / C 轨迹逐笔） |
+| `prototype-c68-cache-panel-v2.html` | 第二版：圆环旁**常驻百分比**的两种放法 + ≥75% 警示态 + 停止态三种处理 |
+| **`prototype-c68-cache-panel-v3.html`** | **最终形态**（2026-11-27 用户确认「可以」）：累计口径四行 + 两种停止态 + 常驻读数 |
+
+**用户 2026-11-25 拍板：只做 B**（圆环面板）。A / C 不做：
+
+- **A（回合尾）** —— 它会给每一轮加一段读数，日常不需要；
+- **C（轨迹逐笔）** —— 跟 A 信息重复，且跟 A 同样是"每轮都看"的东西。
+
+B 的判据：**默认不打扰，点开才看**；而圆环本来就是"token 账本"，命中率是账本的另一半。
+
+### 3.4.1 ⚠️ 口径改判：取最后一笔 → **累计**（2026-11-27）
+
+第一版实现是「**取最后一条 assistant 的 usage**」，理由是"一轮里最后一笔的 input 已经把前面都算进去了 ≈ 这一轮的总账"。
+
+**这个理由是错的。** 用真实会话量出来（`s_…11-20T02-37-39-013Z` 第一次提问）：
+
+| | 最后一笔 | 13 笔累加 |
+|---|---|---|
+| input | 25,238 | **201,343** |
+| output | 964 | 6,727 |
+
+**差 8 倍。** 原因：一轮里模型被调用 13 次（思考→调工具→再思考），每一笔都**重新读了一遍完整历史**。最后一笔只代表"最后一次请求有多长"，代表不了"这一轮花了多少"。
+
+⇒ 最终口径改为**累计**（从最后一条 `user` 消息起），理由与四条细则见 `app/lib/cache-stats/index.ts` 文件头。
+
+### 3.4.2 停止态：不是"没有用量"，而是"最后一笔未计入"
+
+用户在 11-26/27 连问两次，把这件事问清楚了。真实数据（`s_…11-18T08-36-34` 第 1 轮，第 16 行）：
+
+```
+assistant  input=7,326  output=271  stop=toolUse
+  └ toolResult
+assistant  input=0      output=0    stop=aborted    ← 只有这一笔是 0
+```
+
+三条事实：
+
+1. usage 只在**流的最后一个 chunk** 回报（`stream_options.include_usage`）⇒ 中止 = 那个 chunk 永远不来；
+2. 中止那条消息的 `usage` 是**全 0 的占位**，不是"没花钱"（输入可能已经 prefill 过）；
+3. 但**同一轮前面完成的每一笔、以及之前所有轮次，都完整落盘**（`lib/agent/index.ts:243-254` 的"安全停下并交出完整档案" + `_pipeline/index.ts:176-178` 批量落盘）。
+
+⇒ 面板分三态：**正常** / **已停止但有钱**（前几笔之和 + 小字「已停止 · 最后一笔未计入」）/ **已停止且一笔都没完成**（「已停止 · 本轮无数据」）。
+
+**顺带修掉一个真 bug**：中止分支原来写死 `usage: EMPTY_USAGE`，把 `acc.usage`（如果 usage chunk 恰好先到了）扔了 —— 改成 `acc.usage ?? EMPTY_USAGE`。
 
 ### 3.5 风险
 
@@ -137,19 +182,44 @@ function toUsage(u: OpenAiUsage): Usage {
 | 2 | **没有就不写字段**（不是写 0） | 单测：`expect("cachedInput" in usage).toBe(false)` |
 | 3 | **现有三字段一字不动** | 老测试全绿（`lib/deepseekModel` 整包 + `lib` 全量） |
 | 4 | 非流式与流式**走同一个映射** | 代码上只剩一个 `toUsage`；两处调用 |
-| 5 | ⭐ **真机**：同一个会话第二轮请求的 `cachedInput` ≈ 第一轮的 `input + output` | DeepSeek 官方场景 1「下一轮能命中上一轮的上下文缓存」。发两条消息，看会话 JSONL |
+| 5 | ⭐ **真机**：同一个会话第二轮请求的 `cachedInput` ≈ 第一轮的 `input + output`（这是**上限**，实际只会少不会多） | DeepSeek 官方场景 1「下一轮能命中上一轮的上下文缓存」。发两条消息，看会话 JSONL。⚠️ **第一轮本身可能不是 0**：缓存按**前缀**索引（同一用户内）、**不按会话**，所以同一天跑过的提示词会被命中 —— 判据是"第二轮 ≳ 第一轮之和"，**不是**"第一轮必须 0" |
 | 6 | `tsc --noEmit` / `pnpm lint` / 全量单测 | 常规三件套 |
 
 第 5 条是**唯一能证伪"我们以为缓存命中"的判据** —— 前四条都只证明"解析写得对"，只有它证明"数字是真的"。
 
-## 五、⚠️ 缺什么才能定案
+## 五、已拍板
 
-1. **字段名**：`cachedInput` 行不行？（也可以叫 `cacheHit` / `cachedInputTokens`）
-2. **一期是否只到数据层**（不做任何界面）—— 需要用户点头，因为"看不到"可能让人觉得没做完。
+1. **字段名 `cachedInput`**（2026-11-25）—— 已落进 `lib/types.ts`（可选字段，缺席 = provider 没报）
+2. **显示位置：只做 B**（圆环面板）—— A / C 不做，理由见 3.4
+3. ~~取哪条 usage：最后一条 assistant~~ → **改判为「累计」**（2026-11-27），理由见 3.4.1
+4. **停在界面上的两种说法**（2026-11-27）—— 见 3.4.2：不是"无用量"，是"最后一笔未计入"
 
-除此之外没有悬空项：3.1 / 3.2 / 3.3 都是从现有代码结构推出来的，不是发明。
+## 六、实施记录（2026-11-27 定稿）
 
-## 六、与其它项的关系
+分支 `feat/c68-cache-hit-rate`（从 `main` 拉）。
+
+| 文件 | 改了什么 |
+|---|---|
+| `lib/types.ts` | `Usage` 加可选 `cachedInput` + 一段"缺席 ≠ 0"的理由 |
+| `lib/deepseekModel/index.ts` | ① 新增 `OpenAiUsage`（两种形状的并集）、`cachedInputOf`、`toUsage` 归一；非流式改用 `toUsage`（原来手抄了一遍）；两处 raw 类型收成一处 ② **中止分支改成 `acc.usage ?? EMPTY_USAGE`**（原来写死 EMPTY_USAGE，会把已到的 usage 扔掉） |
+| `lib/deepseekModel/index.test.ts` | +4 条：DeepSeek 形状 / OpenAI 形状 / 都没报 ⇒ 键不存在 / 非流式同一条路 |
+| `app/lib/cache-stats/index.ts` | **新增纯函数**：`cacheStatsOf(messages)` → 三态（measured / stopped / unknown）；四条口径写在文件头 |
+| `app/lib/cache-stats/index.test.ts` | **10 条**：只算这一轮 / 累加不取最后一笔 / 加权命中率 / 中止跳过 + partial / 0 笔完成 ⇒ stopped / 缺数 ⇒ unknown / input=0 不出 NaN / >100% 不夹 |
+| `app/lib/use-agent-run.ts` | 派生 `cacheStats`（**不进 store**：纯派生，存一份就多一个事实源） |
+| `app/page.tsx` | 透传 `cacheStats` |
+| `app/components/composer/index.tsx` | 透传 `cacheStats` 给圆环 |
+| `app/components/context-meter/index.tsx` | ① 面板四行（本轮调用 / 累计输入 / 命中缓存 / 命中率）+ 小字注脚（`cacheFootNote`）② **圆环右侧常驻百分比**（≥75% 转警示色） |
+| `app/components/context-meter/context-meter.module.css` | `.cache` / `.cacheRow` / `.cacheKey` / `.cacheValue` / `.foot` / `.reading` |
+
+**验证结果**：`tsc --noEmit` 0 · `pnpm lint` 0 · 全量单测 **68 文件 / 954 条**全绿（起始 940，+14）· dev server `GET /` 200。
+
+**⚠️ 还没做真机验收（第 5 条）** —— 需要真的发两条消息，看面板数字与 `session.jsonl` 里的 `cachedInput` 对不对得上。这是唯一能证明"数字是真的"的判据。
+
+**这一期没做**：A（回合尾读数）、C（轨迹逐笔）。轨迹里其实已经有 `cachedInput`（`message_end` 带整条 message），只是没在界面上渲染。
+
+**已知边界（不在本期）**：进程被杀 / 断电时，那一次 run 的整批消息**不会**落进 `session.jsonl`（批量落盘发生在 run 收尾），但轨迹里有（实时写）。这是 run 落盘策略问题，属于 **C27** 的地盘。
+
+## 七、与其它项的关系
 
 - **C5（遥测 / 分析面板）**：C68 是它的数据前提。C5 做 UI 时要 demo，C68 不用。
 - **B10（工作区记忆注入）**：B10 的核心争议是"塞进系统提示词每轮约 1 万 token、改文件还会废一次缓存"。**C68 做完，这笔账才有实测数字。**

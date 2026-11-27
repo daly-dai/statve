@@ -119,6 +119,18 @@ export type Usage = {
   input: number;
   output: number;
   totalTokens: number;
+  /**
+   * 输入里有多少 token 命中了 provider 的前缀缓存（C68，2026-11-25）。
+   *
+   * ⚠️ **缺席 = "这家 provider 没报"，不等于 0 命中** —— 所以是可选的，
+   * 且适配层"没有就不写这个键"（不是写 0）。写 0 有两个后果：
+   *   ① 语义上把"不知道"说成"零命中"，界面上会显示一个假数字
+   *   ② 现有断言用 `toEqual` 比整个 usage 对象，多一个键当场变红
+   *
+   * 为什么不另存"未命中"：`未命中 = input − cachedInput`，存两个数等于两个
+   * 事实源，它们可能互相矛盾。
+   */
+  cachedInput?: number;
 };
 
 // --- 工具定义 ---

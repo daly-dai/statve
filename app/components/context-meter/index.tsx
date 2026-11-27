@@ -20,6 +20,7 @@ import {
   contextOccupancy,
   type ContextPressure,
 } from "@/app/lib/context-occupancy";
+import type { CacheStats } from "@/app/lib/cache-stats";
 
 /** 圆环几何：14px viewBox、2px stroke */
 const RADIUS = 5.5;
@@ -36,10 +37,51 @@ function formatTokens(value: number): string {
   return `${scaled(value / 1_000_000)}M`;
 }
 
+/**
+ * 缓存那一块底部的小字（C68）。三种形态各有各的说法 —— 见
+ * `app/lib/cache-stats` 的文件头：
+ *   正常跑完 / 缺数据 → 不写小字（没有要解释的）
+ *   中止「有钱」（partial）→ 说明最后那笔没算进来
+ *   中止「一笔都没完成」→ 说明数据来源本来就是空
+ *   provider 没报 → 说明为什么给不出数
+ */
+function cacheFootNote(stats: CacheStats | undefined): string {
+  if (stats === undefined) return "";
+  if (stats.kind === "stopped") return "已停止 · 本轮无数据";
+  if (stats.kind === "unknown") return "provider 未报缓存用量";
+  return stats.partial ? "已停止 · 最后一笔未计入" : "";
+}
+
+/** 面板里的一行读数：左标签 + 右数字（默认 mono 右对齐；`plain` 用于"13 笔"这类文字值） */
+function CacheRow({
+  label,
+  value,
+  plain = false,
+}: {
+  label: string;
+  value: string;
+  plain?: boolean;
+}) {
+  return (
+    <div className={styles.cacheRow}>
+      <span className={styles.cacheKey}>{label}</span>
+      <span className={styles.cacheValue} data-plain={plain}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
 export function ContextMeter({
   pressure,
+  cacheStats,
 }: {
   pressure: ContextPressure | undefined;
+  /**
+   * 这一轮的缓存命中读数（C68）。
+   * `undefined` = provider 没报 ⇒ 面板里那三行**整块不出现** —— 显示 0% 是在说谎。
+   */
+  cacheStats: CacheStats | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLSpanElement>(null);
@@ -78,6 +120,7 @@ export function ContextMeter({
   if (context === null) return null;
   const percent = context.percent;
   const reading = `${percent}%`;
+  const footNote = cacheFootNote(cacheStats);
 
   return (
     <span ref={rootRef} className={styles.root}>
@@ -103,6 +146,11 @@ export function ContextMeter({
           />
         </svg>
       </button>
+      {/* C68：常驻读数 —— 不点开也知道上下文占了百分之几。
+          高占用时跟圆环填充一起转警示色（两处不一致会让人以为哪个坏了）。 */}
+      <span className={styles.reading} data-high={percent >= 75}>
+        {reading}
+      </span>
       {open && (
         <div
           className={styles.panel}
@@ -119,6 +167,37 @@ export function ContextMeter({
           <div className={styles.bar}>
             <div className={styles.segment} style={{ width: `${percent}%` }} />
           </div>
+          {/* C68：这一轮的缓存账（**累计**口径：从最后一条 user 消息起）。
+              三种形态各有各的说法，见 app/lib/cache-stats 的文件头。 */}
+          {cacheStats !== undefined && (
+            <div className={styles.cache}>
+              {cacheStats.kind === "measured" && (
+                <>
+                  <CacheRow
+                    label="本轮调用"
+                    value={`${cacheStats.calls} 笔`}
+                    plain
+                  />
+                  <CacheRow
+                    label="累计输入"
+                    value={formatTokens(cacheStats.input)}
+                  />
+                  <CacheRow
+                    label="命中缓存"
+                    value={formatTokens(cacheStats.cached)}
+                  />
+                  <CacheRow label="命中率" value={`${cacheStats.percent}%`} />
+                </>
+              )}
+              {cacheStats.kind === "stopped" && (
+                <CacheRow label="本轮调用" value="0 笔" plain />
+              )}
+              {cacheStats.kind === "unknown" && (
+                <CacheRow label="本轮用量" value="未知" plain />
+              )}
+              {footNote !== "" && <div className={styles.foot}>{footNote}</div>}
+            </div>
+          )}
         </div>
       )}
     </span>
