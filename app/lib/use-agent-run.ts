@@ -24,6 +24,7 @@
 
 import { useCallback, useEffect } from "react";
 import { useRunStore, useSessionRun } from "./run-store";
+import { cacheStatsOf } from "./cache-stats";
 import type { RunState } from "./run-fold";
 
 // 类型 re-export：approval-dialog / ask-user-card 从这里 import，
@@ -82,6 +83,9 @@ export function useAgentRun(sessionId: string) {
     commandFeedback: run.commandFeedback,
     commandRunning: run.commandRunning,
     contextPressure: run.contextPressure,
+    // C68：这一轮的缓存命中读数（圆环面板里那三行）。**纯派生，不进 store** ——
+    // 它完全由 messages 决定，存一份就会有"两份事实源"的缝隙。
+    cacheStats: cacheStatsOf(run.messages),
     stats: run.stats,
     pendingApproval: run.pendingApproval,
     approve,

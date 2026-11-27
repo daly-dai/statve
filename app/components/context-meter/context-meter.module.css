@@ -14,6 +14,8 @@
 .root {
   position: relative;
   display: inline-flex;
+  /* C68：右侧多了读数，两者垂直居中对齐 */
+  align-items: center;
 }
 
 /* 28px 圆形命中区（DSH 同款，与发送按钮同列） */
@@ -113,4 +115,69 @@
   height: 100%;
   border-radius: 1px;
   background: var(--ink-faint);
+}
+
+/* ============================================================
+   C68：缓存账三行（2026-11-25）
+   ------------------------------------------------------------
+   排版语言沿用上面的 .header：左标签（--ink-faint）+ 右读数（--ink + mono
+   + tabular-nums），数字右对齐是为了三行能上下对齐。
+   与条形图之间用一条 1px 上边线分隔 —— 同一个分界只用一种手段（AGENTS 的
+   表面纪律：底色差 or 线，不两个一起上）。
+   ============================================================ */
+.cache {
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-mid);
+}
+
+.cacheRow {
+  display: flex;
+  gap: 6px;
+}
+
+.cacheKey {
+  color: var(--ink-faint);
+}
+
+.cacheValue {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* "13 笔" / "未知" 这类文字值不用等宽字体（等宽里中文会难看得像坏掉） */
+.cacheValue[data-plain="true"] {
+  font-family: var(--font-sans);
+}
+
+/* 小字注脚：只在"已停止"或"provider 没报"时出现 */
+.foot {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line);
+  color: var(--ink-faint);
+  font-size: 11.5px;
+}
+
+/* ============================================================
+   圆环右侧的常驻读数（C68）
+   ------------------------------------------------------------
+   不点开也能看到上下文占用百分比。11.5px mono / 字距略收，
+   与底栏「N 轮 · M 工具 · X token」同一族（回执读数，不是依据）。
+   高占用（≥75%）转警示色，与圆环填充保持一致 —— 否则会出现
+   "环变红了、数字还是灰的"。
+   ============================================================ */
+.reading {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+  letter-spacing: -0.01em;
+}
+
+.reading[data-high="true"] {
+  color: var(--pen-signal);
 }

@@ -26,6 +26,7 @@ import { ContextMeter } from "../context-meter";
 import { SkillChip } from "../skill-chip";
 import { formatTokens } from "@/app/lib/format";
 import type { ContextPressure } from "@/app/lib/context-occupancy";
+import type { CacheStats } from "@/app/lib/cache-stats";
 import type { CommandMenuState } from "@/app/lib/use-command-menu";
 import type { ApprovalMode } from "@/app/services/chat/types";
 import type { SessionStats } from "@/lib/types";
@@ -54,6 +55,8 @@ type ComposerProps = {
   stats: SessionStats;
   /** 上下文占用（圆环；无数据时不渲染） */
   contextPressure: ContextPressure | undefined;
+  /** 这一轮的缓存命中读数（C68）：圆环面板里的三行。缺席 = provider 没报 */
+  cacheStats: CacheStats | undefined;
   /** 空会话：卡片内顶部那行工作空间名 + 换一句 placeholder */
   empty: { visible: boolean; workspaceName?: string };
   /**
@@ -70,6 +73,7 @@ export function Composer({
   run,
   stats,
   contextPressure,
+  cacheStats,
   empty,
   state,
 }: ComposerProps) {
@@ -146,7 +150,7 @@ export function Composer({
         <div className={styles.consoleActions}>
           <ApprovalModeMenu mode={approval.mode} onChange={approval.onChange} />
           <div className={styles.consoleActionsRight}>
-            <ContextMeter pressure={contextPressure} />
+            <ContextMeter pressure={contextPressure} cacheStats={cacheStats} />
             <SubmitButton run={run} input={input} />
           </div>
         </div>

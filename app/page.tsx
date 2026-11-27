@@ -148,6 +148,7 @@ export default function Home() {
     commandFeedback,
     commandRunning,
     contextPressure,
+    cacheStats,
     setError,
   } = useAgentRun(currentId);
 
@@ -436,6 +437,7 @@ export default function Home() {
                     run={{ loading, runId, stop }}
                     stats={stats}
                     contextPressure={contextPressure}
+                    cacheStats={cacheStats}
                     empty={{ visible: emptyStage, workspaceName }}
                     state={{
                       disabled: composerDisabled,

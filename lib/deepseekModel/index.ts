@@ -248,7 +248,9 @@ export class DeepSeekModel implements TeachingModel {
           role: "assistant",
           content: abortedContent(acc),
           stopReason: "aborted",
-          usage: EMPTY_USAGE,
+          // C68：`acc.usage` 可能已经有值（usage chunk 恰好先到了）。
+          // 一路写死 EMPTY_USAGE 会把它扔掉，白丢一次真实读数。
+          usage: acc.usage ?? EMPTY_USAGE,
           timestamp: Date.now(),
         };
       }
@@ -431,16 +433,43 @@ function buildStreamMessage(params: {
   };
 }
 
-/** OpenAI 的 usage 字段 → 统一 Usage（流式最后一个 chunk 携带） */
-function toUsage(u: {
+/**
+ * OpenAI 兼容协议里的 usage。这里是**两种 provider 形状的并集**（C68）：
+ *   - DeepSeek：`prompt_cache_hit_tokens` / `prompt_cache_miss_tokens` 分开报
+ *   - OpenAI 风格（Kimi / 智谱 / MiniMax…）：命中数挂在 `prompt_tokens_details.cached_tokens`
+ *
+ * 为什么不把 `prompt_cache_miss_tokens` 也存进 `Usage`：`未命中 = input − 命中`，
+ * 能算出来的东西不存第二份 —— 两份事实源就可能互相矛盾。
+ */
+type OpenAiUsage = {
   prompt_tokens?: number;
   completion_tokens?: number;
   total_tokens?: number;
-}): Usage {
+  /** DeepSeek：命中前缀缓存的 token 数 */
+  prompt_cache_hit_tokens?: number;
+  /** DeepSeek：未命中的 token 数（只在类型上留个名字，方便对着官方文档看） */
+  prompt_cache_miss_tokens?: number;
+  /** OpenAI 风格：命中数挂在 details 里 */
+  prompt_tokens_details?: { cached_tokens?: number };
+};
+
+/** 两种形状的"命中数"归一。都没报 ⇒ `undefined`（**不是 0**：没报 ≠ 零命中） */
+function cachedInputOf(usage: OpenAiUsage): number | undefined {
+  return (
+    usage.prompt_cache_hit_tokens ?? usage.prompt_tokens_details?.cached_tokens
+  );
+}
+
+/** OpenAI 的 usage → 统一 Usage。流式最后一个 chunk 与非流式共用这一处 */
+function toUsage(usage: OpenAiUsage): Usage {
+  const cachedInput = cachedInputOf(usage);
   return {
-    input: u.prompt_tokens ?? 0,
-    output: u.completion_tokens ?? 0,
-    totalTokens: u.total_tokens ?? 0,
+    input: usage.prompt_tokens ?? 0,
+    output: usage.completion_tokens ?? 0,
+    totalTokens: usage.total_tokens ?? 0,
+    // ⚠️ 没有就**不写这个键**，不写 0：现有断言用 toEqual 比整个对象，
+    // 多一个键当场变红；语义上也把"不知道"说成了"零命中"。
+    ...(cachedInput === undefined ? {} : { cachedInput }),
   };
 }
 
@@ -590,11 +619,9 @@ function toTeachingAssistantMessage(
 
   content.push(...toolCalls);
 
-  const usage: Usage = {
-    input: data.usage?.prompt_tokens ?? 0,
-    output: data.usage?.completion_tokens ?? 0,
-    totalTokens: data.usage?.total_tokens ?? 0,
-  };
+  // 非流式：与流式走**同一个** toUsage —— 以前这里手抄了一遍三行映射，
+  // 加字段就得改两处（C68 收口）。
+  const usage = toUsage(data.usage ?? {});
 
   return {
     role: "assistant",
@@ -790,11 +817,7 @@ type OpenAiResponse = {
     };
     finish_reason?: string;
   }>;
-  usage?: {
-    prompt_tokens?: number;
-    completion_tokens?: number;
-    total_tokens?: number;
-  };
+  usage?: OpenAiUsage;
 };
 
 type OpenAiChunk = {
@@ -813,9 +836,5 @@ type OpenAiChunk = {
     finish_reason?: string | null;
   }>;
   // include_usage 时，流的最后一个 chunk 携带用量
-  usage?: {
-    prompt_tokens?: number;
-    completion_tokens?: number;
-    total_tokens?: number;
-  };
+  usage?: OpenAiUsage;
 };
